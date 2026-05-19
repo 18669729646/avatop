@@ -1,0 +1,641 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { UploadZone } from '@/components/upload-zone';
+import { authFetch } from '@/lib/auth-context';
+import { ShowcaseCase } from '@/types/showcase';
+import { Plus, Trash2, Edit, Film, Loader2, Play, Image as ImageIcon, X } from 'lucide-react';
+import { VideoPlayer } from '@/components/video-player';
+
+export default function ShowcaseCasesPage() {
+  const [cases, setCases] = useState<ShowcaseCase[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [showDialog, setShowDialog] = useState(false);
+  const [editingCase, setEditingCase] = useState<ShowcaseCase | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [playingVideo, setPlayingVideo] = useState<string | null>(null);
+
+  // 表单状态
+  const [formData, setFormData] = useState({
+    title: '',
+    description: '',
+    type: 'shortfilm',
+    category: '',
+    thumbnailUrl: '',
+    mediaUrl: '',
+    mediaType: 'video',
+    prompt: '',
+    model: '',
+    duration: '',
+    isFeatured: false,
+    displayOrder: 0,
+  });
+
+  const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    loadCases();
+  }, []);
+
+  const loadCases = async () => {
+    setIsLoading(true);
+    try {
+      const response = await authFetch('/api/admin/showcase-cases?limit=50');
+      const data = await response.json();
+      if (data.success) {
+        setCases(data.data);
+      }
+    } catch (error) {
+      console.error('加载案例失败:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleUploadFile = async (file: File, type: 'thumbnail' | 'media') => {
+    setUploading(true);
+    try {
+      // 保存当前状态，用于判断是否需要自动提取缩略图
+      const currentThumbnailUrl = formData.thumbnailUrl;
+
+      const uploadFormData = new FormData();
+      uploadFormData.append('file', file);
+      uploadFormData.append('folder', type === 'thumbnail' ? 'thumbnails' : 'videos');
+
+      const response = await authFetch('/api/upload-showcase', {
+        method: 'POST',
+        body: uploadFormData,
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        if (type === 'thumbnail') {
+          setFormData(prev => ({ ...prev, thumbnailUrl: data.data.url }));
+        } else {
+          setFormData(prev => ({ ...prev, mediaUrl: data.data.url, mediaType: data.data.mediaType }));
+
+          // 如果上传的是视频且没有缩略图，自动提取缩略图
+          if (data.data.mediaType === 'video' && !currentThumbnailUrl) {
+            console.log('[上传完成] 视频上传成功，尝试自动提取缩略图...');
+            await extractThumbnailFromVideo(data.data.url);
+          }
+        }
+      } else {
+        alert(data.error || '上传失败');
+      }
+    } catch (error) {
+      console.error('上传失败:', error);
+      alert('上传失败');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // 从视频提取缩略图（使用 HTML5 Video API）
+  const extractThumbnailFromVideo = async (videoUrl: string): Promise<void> => {
+    return new Promise((resolve) => {
+      const video = document.createElement('video');
+      video.src = videoUrl;
+      video.crossOrigin = 'anonymous';
+      video.muted = true;
+      video.currentTime = 1; // 提取第 1 秒的帧
+
+      video.onloadeddata = () => {
+        // 等待一帧加载完成
+        setTimeout(() => {
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            console.warn('[提取缩略图] 无法获取 Canvas 上下文');
+            resolve();
+            return;
+          }
+
+          // 设置画布尺寸（保持宽高比，宽度固定为 480px）
+          const aspectRatio = video.videoWidth / video.videoHeight;
+          canvas.width = 480;
+          canvas.height = Math.round(480 / aspectRatio);
+
+          // 绘制视频帧
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+          // 转换为 Blob
+          canvas.toBlob(async (blob) => {
+            if (!blob) {
+              console.warn('[提取缩略图] 无法转换图片');
+              resolve();
+              return;
+            }
+
+            // 上传缩略图
+            const file = new File([blob], 'thumbnail.jpg', { type: 'image/jpeg' });
+            await handleUploadFile(file, 'thumbnail');
+            resolve();
+          }, 'image/jpeg', 0.8);
+        }, 100);
+      };
+
+      video.onerror = () => {
+        console.warn('[提取缩略图] 视频加载失败');
+        resolve();
+      };
+    });
+  };
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      const payload = {
+        ...formData,
+        duration: formData.duration ? parseInt(formData.duration) : undefined,
+      };
+
+      if (editingCase) {
+        await authFetch(`/api/admin/showcase-cases?id=${editingCase.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await authFetch('/api/admin/showcase-cases', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      }
+
+      setShowDialog(false);
+      resetForm();
+      loadCases();
+    } catch (error) {
+      console.error('保存失败:', error);
+      alert('保存失败');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleEdit = (item: ShowcaseCase) => {
+    setEditingCase(item);
+    setFormData({
+      title: item.title,
+      description: item.description || '',
+      type: item.type,
+      category: item.category || '',
+      thumbnailUrl: item.thumbnailUrl,
+      mediaUrl: item.mediaUrl,
+      mediaType: item.mediaType,
+      prompt: item.prompt || '',
+      model: item.model || '',
+      duration: item.duration?.toString() || '',
+      isFeatured: item.isFeatured,
+      displayOrder: item.displayOrder,
+    });
+    setShowDialog(true);
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('确定要删除这个案例吗？')) return;
+
+    try {
+      await authFetch(`/api/admin/showcase-cases?id=${id}`, {
+        method: 'DELETE',
+      });
+      loadCases();
+    } catch (error) {
+      console.error('删除失败:', error);
+      alert('删除失败');
+    }
+  };
+
+  const handleToggleFeatured = async (item: ShowcaseCase) => {
+    try {
+      await authFetch(`/api/admin/showcase-cases?id=${item.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isFeatured: !item.isFeatured }),
+      });
+      loadCases();
+    } catch (error) {
+      console.error('更新失败:', error);
+    }
+  };
+
+  const resetForm = () => {
+    setFormData({
+      title: '',
+      description: '',
+      type: 'shortfilm',
+      category: '',
+      thumbnailUrl: '',
+      mediaUrl: '',
+      mediaType: 'video',
+      prompt: '',
+      model: '',
+      duration: '',
+      isFeatured: false,
+      displayOrder: 0,
+    });
+    setEditingCase(null);
+  };
+
+  return (
+    <div className="flex min-h-screen">
+      <div className="flex-1">
+        <div className="container mx-auto p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h1 className="text-2xl font-bold">成品案例管理</h1>
+              <p className="text-muted-foreground">管理首页展示的成品案例</p>
+            </div>
+            <Button onClick={() => { resetForm(); setShowDialog(true); }}>
+              <Plus className="w-4 h-4 mr-2" />
+              新增案例
+            </Button>
+          </div>
+
+          {isLoading ? (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="w-8 h-8 animate-spin" />
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {cases.map((item) => (
+                <Card key={item.id} className="overflow-hidden">
+                  <div
+                    className="aspect-video bg-muted relative cursor-pointer group"
+                    onClick={() => {
+                      if (item.mediaType === 'video') {
+                        setPlayingVideo(item.id);
+                      }
+                    }}
+                  >
+                    {item.thumbnailUrl ? (
+                      <img src={item.thumbnailUrl} alt={item.title} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-muted-foreground">
+                        {item.mediaType === 'video' ? <Film className="w-12 h-12" /> : <ImageIcon className="w-12 h-12" />}
+                      </div>
+                    )}
+                    {item.mediaType === 'video' && (
+                      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/30">
+                        <Play className="w-12 h-12 text-white fill-white" />
+                      </div>
+                    )}
+                    {item.isFeatured && (
+                      <Badge className="absolute top-2 left-2">精选</Badge>
+                    )}
+                  </div>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base truncate">{item.title}</CardTitle>
+                    <CardDescription className="text-xs">
+                      {item.type === 'shortfilm' ? '短片' : item.type === 'video' ? '视频' : '图片'}
+                      {item.duration && ` · ${item.duration}秒`}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-2">
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => handleEdit(item)}
+                      >
+                        <Edit className="w-3 h-3 mr-1" />
+                        编辑
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleToggleFeatured(item)}
+                      >
+                        {item.isFeatured ? '取消精选' : '设为精选'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleDelete(item.id)}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 新增/编辑对话框 */}
+      <Dialog open={showDialog} onOpenChange={(open) => {
+        console.log('[Dialog] onOpenChange:', open);
+        setShowDialog(open);
+      }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editingCase ? '编辑案例' : '新增案例'}</DialogTitle>
+            <DialogDescription>
+              {editingCase ? '修改案例信息' : '创建新的成品案例'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-5 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>标题 *</Label>
+                <Input
+                  value={formData.title}
+                  onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
+                  placeholder="案例标题"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>分类</Label>
+                <Select
+                  value={formData.category}
+                  onValueChange={(value) => setFormData(prev => ({ ...prev, category: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择分类" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="美妆">美妆</SelectItem>
+                    <SelectItem value="数码">数码</SelectItem>
+                    <SelectItem value="家居">家居</SelectItem>
+                    <SelectItem value="服饰">服饰</SelectItem>
+                    <SelectItem value="其他">其他</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>描述</Label>
+              <Textarea
+                value={formData.description}
+                onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                placeholder="案例描述"
+                rows={2}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <UploadZone
+                label="缩略图"
+                accept="image/*"
+                fileUrl={formData.thumbnailUrl}
+                uploading={uploading}
+                onFileSelect={(file) => {
+                  if (file.size > 0) handleUploadFile(file, 'thumbnail');
+                }}
+                hint="支持 JPG、PNG、WebP 格式"
+              />
+              <p className="text-xs text-muted-foreground">
+                提示：上传视频后会自动提取缩略图，可省略此步骤
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <UploadZone
+                label="媒体文件 *"
+                accept="video/*,image/*"
+                fileUrl={formData.mediaUrl}
+                uploading={uploading}
+                onFileSelect={(file) => {
+                  if (file.size > 0) handleUploadFile(file, 'media');
+                }}
+                hint="支持 MP4、WebM、MOV 等视频格式，以及图片格式"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>模型</Label>
+                <Input
+                  value={formData.model}
+                  onChange={(e) => setFormData(prev => ({ ...prev, model: e.target.value }))}
+                  placeholder="使用的模型"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>时长（秒）</Label>
+                <Input
+                  type="number"
+                  value={formData.duration}
+                  onChange={(e) => setFormData(prev => ({ ...prev, duration: e.target.value }))}
+                  placeholder="视频时长"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>提示词</Label>
+              <Textarea
+                value={formData.prompt}
+                onChange={(e) => setFormData(prev => ({ ...prev, prompt: e.target.value }))}
+                placeholder="使用的提示词"
+                rows={3}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="flex items-center justify-between p-3 border rounded">
+                <div>
+                  <div className="font-medium">设为精选</div>
+                  <p className="text-xs text-muted-foreground">在首页优先展示</p>
+                </div>
+                <Switch
+                  checked={formData.isFeatured}
+                  onCheckedChange={(checked) => setFormData(prev => ({ ...prev, isFeatured: checked }))}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>显示顺序</Label>
+                <Input
+                  type="number"
+                  value={formData.displayOrder}
+                  onChange={(e) => setFormData(prev => ({ ...prev, displayOrder: parseInt(e.target.value) }))}
+                  placeholder="数字越小越靠前"
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <DialogTitle>{editingCase ? '编辑案例' : '新增案例'}</DialogTitle>
+            <DialogDescription>
+              {editingCase ? '修改案例信息' : '创建新的成品案例'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <ScrollArea className="flex-1 pr-4">
+            <div className="space-y-5 py-2">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>标题 *</Label>
+                  <Input
+                    value={formData.title}
+                    onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
+                    placeholder="案例标题"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>分类</Label>
+                  <Select
+                    value={formData.category}
+                    onValueChange={(value) => setFormData(prev => ({ ...prev, category: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="选择分类" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="美妆">美妆</SelectItem>
+                      <SelectItem value="数码">数码</SelectItem>
+                      <SelectItem value="家居">家居</SelectItem>
+                      <SelectItem value="服饰">服饰</SelectItem>
+                      <SelectItem value="其他">其他</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>描述</Label>
+                <Textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="案例描述"
+                  rows={2}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <UploadZone
+                  label="缩略图"
+                  accept="image/*"
+                  fileUrl={formData.thumbnailUrl}
+                  uploading={uploading}
+                  onFileSelect={(file) => {
+                    if (file.size > 0) handleUploadFile(file, 'thumbnail');
+                  }}
+                  hint="支持 JPG、PNG、WebP 格式"
+                />
+                <p className="text-xs text-muted-foreground">
+                  提示：上传视频后会自动提取缩略图，可省略此步骤
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <UploadZone
+                  label="媒体文件 *"
+                  accept="video/*,image/*"
+                  fileUrl={formData.mediaUrl}
+                  uploading={uploading}
+                  onFileSelect={(file) => {
+                    if (file.size > 0) handleUploadFile(file, 'media');
+                  }}
+                  hint="支持 MP4、WebM、MOV 等视频格式，以及图片格式"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>模型</Label>
+                  <Input
+                    value={formData.model}
+                    onChange={(e) => setFormData(prev => ({ ...prev, model: e.target.value }))}
+                    placeholder="使用的模型"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>时长（秒）</Label>
+                  <Input
+                    type="number"
+                    value={formData.duration}
+                    onChange={(e) => setFormData(prev => ({ ...prev, duration: e.target.value }))}
+                    placeholder="视频时长"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>提示词</Label>
+                <Textarea
+                  value={formData.prompt}
+                  onChange={(e) => setFormData(prev => ({ ...prev, prompt: e.target.value }))}
+                  placeholder="使用的提示词"
+                  rows={3}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex items-center justify-between p-3 border rounded">
+                  <div>
+                    <div className="font-medium">设为精选</div>
+                    <p className="text-xs text-muted-foreground">在首页优先展示</p>
+                  </div>
+                  <Switch
+                    checked={formData.isFeatured}
+                    onCheckedChange={(checked) => setFormData(prev => ({ ...prev, isFeatured: checked }))}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>显示顺序</Label>
+                  <Input
+                    type="number"
+                    value={formData.displayOrder}
+                    onChange={(e) => setFormData(prev => ({ ...prev, displayOrder: parseInt(e.target.value) }))}
+                    placeholder="数字越小越靠前"
+                  />
+                </div>
+              </div>
+            </div>
+          </ScrollArea>
+
+          <DialogFooter className="shrink-0 pt-4 border-t">
+            <Button variant="outline" onClick={() => setShowDialog(false)} disabled={isSaving}>
+              取消
+            </Button>
+            <Button onClick={handleSave} disabled={isSaving || uploading}>
+              {isSaving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 视频播放对话框 */}
+      {playingVideo && (
+        <Dialog open={!!playingVideo} onOpenChange={() => setPlayingVideo(null)}>
+          <DialogContent className="max-w-4xl">
+            {(() => {
+              const video = cases.find(c => c.id === playingVideo);
+              return video && video.mediaUrl ? (
+                <VideoPlayer src={video.mediaUrl} />
+              ) : null;
+            })()}
+          </DialogContent>
+        </Dialog>
+      )}
+    </div>
+  );
+}
