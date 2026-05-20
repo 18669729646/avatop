@@ -5,9 +5,14 @@ import {
   CacheKeys,
 } from './cache';
 import { getAuthToken } from './api';
+import { ANALYSIS_MASTER_TASK_TYPES } from './task-types';
 
 export type TaskType = 'image' | 'video' | 'script' | 'analysis' | 'analysis_batch_import';
 export type TaskStatus = 'pending' | 'running' | 'retrying' | 'success' | 'failed' | 'started' | 'progress';
+
+export interface QueueQueryOptions {
+  excludeAnalysisMaster?: boolean;
+}
 
 // 图片生成任务参数
 export interface ImageTaskParams {
@@ -226,14 +231,42 @@ function generateTaskId(): string {
   return `task_${timestamp}_${random}`;
 }
 
+export function buildTaskQueueSearchParams(
+  viewMode: 'all' | 'mine' = 'mine',
+  options: QueueQueryOptions = {}
+): URLSearchParams {
+  const params = new URLSearchParams();
+  if (viewMode === 'all') {
+    params.set('viewAll', 'true');
+  }
+  if (options.excludeAnalysisMaster ?? true) {
+    params.set('excludeAnalysisMaster', 'true');
+  }
+  return params;
+}
+
+export function buildQueueStatsSearchParams(
+  viewMode: 'all' | 'mine' = 'mine',
+  options: QueueQueryOptions = {}
+): URLSearchParams {
+  const params = new URLSearchParams();
+  if (viewMode === 'all') {
+    params.set('viewAll', 'true');
+  }
+  if (options.excludeAnalysisMaster ?? true) {
+    params.set('excludeAnalysisMaster', 'true');
+  }
+  return params;
+}
+
 // 获取任务队列（从服务器）
 // viewMode: 'all' = 管理员查看所有任务, 'mine' = 查看自己的任务
-export async function getTaskQueue(viewMode: 'all' | 'mine' = 'mine'): Promise<{ tasks: QueueTask[]; isAdmin: boolean }> {
+export async function getTaskQueue(
+  viewMode: 'all' | 'mine' = 'mine',
+  options: QueueQueryOptions = {}
+): Promise<{ tasks: QueueTask[]; isAdmin: boolean }> {
   try {
-    const params = new URLSearchParams();
-    if (viewMode === 'all') {
-      params.set('viewAll', 'true');
-    }
+    const params = buildTaskQueueSearchParams(viewMode, options);
     
     const response = await authFetch(`/api/tasks?${params.toString()}`);
     const data = await response.json();
@@ -267,7 +300,7 @@ export async function getTaskQueue(viewMode: 'all' | 'mine' = 'mine'): Promise<{
       userId: task.user_id as string | undefined,
       userPhone: task.user_phone as string | undefined,
       userNickname: task.user_nickname as string | undefined,
-    }));
+    })).filter((task: QueueTask) => !((options.excludeAnalysisMaster ?? true) && ANALYSIS_MASTER_TASK_TYPES.includes(task.type as typeof ANALYSIS_MASTER_TASK_TYPES[number])));
     
     return { tasks, isAdmin: data.isAdmin || false };
   } catch (error) {
@@ -283,21 +316,39 @@ export function getTaskQueueSync(): QueueTask[] {
 
 // 获取队列统计
 // viewMode: 'all' = 管理员查看所有任务统计, 'mine' = 查看自己的任务统计
-export async function getQueueStats(viewMode: 'all' | 'mine' = 'mine'): Promise<{ stats: QueueStats; isAdmin: boolean }> {
+export async function getQueueStats(
+  viewMode: 'all' | 'mine' = 'mine',
+  options: QueueQueryOptions = {}
+): Promise<{ stats: QueueStats; isAdmin: boolean }> {
   try {
-    const params = new URLSearchParams();
-    if (viewMode === 'all') {
-      params.set('viewAll', 'true');
+    const shouldExcludeAnalysisMaster = options.excludeAnalysisMaster ?? true;
+    if (shouldExcludeAnalysisMaster) {
+      const queue = await getTaskQueue(viewMode, options);
+      const stats = queue.tasks.reduce<QueueStats>((acc, task) => {
+        acc.total += 1;
+        if (task.status === 'pending') acc.pending += 1;
+        else if (task.status === 'running') acc.running += 1;
+        else if (task.status === 'retrying') acc.retrying += 1;
+        else if (task.status === 'success') acc.success += 1;
+        else if (task.status === 'failed') acc.failed += 1;
+        return acc;
+      }, { total: 0, pending: 0, running: 0, retrying: 0, success: 0, failed: 0 });
+
+      return {
+        stats,
+        isAdmin: queue.isAdmin,
+      };
     }
-    
+
+    const params = buildQueueStatsSearchParams(viewMode, options);
     const response = await authFetch(`/api/tasks/batch?${params.toString()}`);
     const data = await response.json();
-    
+
     if (!response.ok) {
       return { stats: { total: 0, pending: 0, running: 0, retrying: 0, success: 0, failed: 0 }, isAdmin: false };
     }
-    
-    return { 
+
+    return {
       stats: data.data || { total: 0, pending: 0, running: 0, retrying: 0, success: 0, failed: 0 },
       isAdmin: data.isAdmin || false,
     };

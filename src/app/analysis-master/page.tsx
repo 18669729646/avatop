@@ -236,7 +236,7 @@ export default function AnalysisMasterPage() {
   const router = useRouter();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
-  const { tasks: queueTasks } = useTaskQueue('mine', user?.id);
+  const { tasks: queueTasks } = useTaskQueue('mine', user?.id, { excludeAnalysisMaster: false });
   const [serverProjects, setServerProjects] = useState<AnalysisProject[]>([]);
   const [draftProjects, setDraftProjects] = useState<AnalysisMasterDraftProject[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');

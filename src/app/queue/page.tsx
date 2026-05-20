@@ -59,11 +59,8 @@ import {
 import {
   QueueTask,
   removeTaskFromQueue,
+  removeTasksFromQueue,
   retryTask,
-  retryAllFailedTasks,
-  clearCompletedTasks,
-  clearFailedTasks,
-  clearTaskQueue,
   getTaskDuration,
   formatDuration,
   ImageTaskResult,
@@ -473,7 +470,8 @@ export default function QueuePage() {
 
   const handleRetryAllFailed = async () => {
     // 获取当前失败的任务数量
-    const failedCount = stats.failed;
+    const failedTasks = tasks.filter(t => t.status === 'failed');
+    const failedCount = failedTasks.length;
     if (failedCount === 0) return;
     
     // 先更新本地状态（立即反馈）
@@ -490,7 +488,9 @@ export default function QueuePage() {
     }));
     
     // 调用 API
-    await retryAllFailedTasks();
+    for (const task of failedTasks) {
+      await retryTask(task.id);
+    }
     
     // 刷新数据以确保同步
     loadTasks();
@@ -501,7 +501,10 @@ export default function QueuePage() {
   };
 
   const confirmClearCompleted = async () => {
-    await clearCompletedTasks();
+    const completedTaskIds = tasks.filter(task => task.status === 'success').map(task => task.id);
+    if (completedTaskIds.length > 0) {
+      await removeTasksFromQueue(completedTaskIds);
+    }
     setShowClearCompletedDialog(false);
     loadTasks();
   };
@@ -511,14 +514,20 @@ export default function QueuePage() {
   };
 
   const confirmClearFailed = async () => {
-    await clearFailedTasks();
+    const failedTaskIds = tasks.filter(task => task.status === 'failed').map(task => task.id);
+    if (failedTaskIds.length > 0) {
+      await removeTasksFromQueue(failedTaskIds);
+    }
     setShowClearFailedDialog(false);
     loadTasks();
   };
 
   const handleClearAll = async () => {
     if (confirm('确定要清空所有任务吗？')) {
-      await clearTaskQueue();
+      const visibleTaskIds = tasks.map(task => task.id);
+      if (visibleTaskIds.length > 0) {
+        await removeTasksFromQueue(visibleTaskIds);
+      }
       loadTasks();
     }
   };

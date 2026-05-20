@@ -1,5 +1,5 @@
 import useSWR from 'swr';
-import { QueueTask, getTaskQueue, getQueueStats } from '@/lib/queue';
+import { QueueTask, QueueQueryOptions, getTaskQueue, getQueueStats } from '@/lib/queue';
 
 /**
  * 任务队列 Hook
@@ -7,12 +7,17 @@ import { QueueTask, getTaskQueue, getQueueStats } from '@/lib/queue';
  * @param viewMode 'all' = 管理员查看所有任务, 'mine' = 查看自己的任务
  * @param userId 当前用户 ID（用于缓存隔离）
  */
-export function useTaskQueue(viewMode: 'all' | 'mine' = 'mine', userId?: string | null) {
-  const cacheKey = userId ? `task-queue:${userId}:${viewMode}` : null;
+export function useTaskQueue(
+  viewMode: 'all' | 'mine' = 'mine',
+  userId?: string | null,
+  options: QueueQueryOptions = {}
+) {
+  const shouldHideAnalysisMaster = options.excludeAnalysisMaster ?? true;
+  const cacheKey = userId ? `task-queue:${userId}:${viewMode}:${shouldHideAnalysisMaster ? 'hide-analysis' : 'show-analysis'}` : null;
   
   const { data, error, isLoading, mutate } = useSWR<{ tasks: QueueTask[]; isAdmin: boolean }>(
     cacheKey,
-    () => getTaskQueue(viewMode),
+    () => getTaskQueue(viewMode, options),
     {
       refreshInterval: 3000, // 每3秒自动刷新（加快频率）
       revalidateOnFocus: true, // 窗口聚焦时刷新
@@ -35,12 +40,17 @@ export function useTaskQueue(viewMode: 'all' | 'mine' = 'mine', userId?: string 
  * @param viewMode 'all' = 管理员查看所有任务统计, 'mine' = 查看自己的任务统计
  * @param userId 当前用户 ID（用于缓存隔离）
  */
-export function useTaskStats(viewMode: 'all' | 'mine' = 'mine', userId?: string | null) {
-  const cacheKey = userId ? `task-stats:${userId}:${viewMode}` : null;
+export function useTaskStats(
+  viewMode: 'all' | 'mine' = 'mine',
+  userId?: string | null,
+  options: QueueQueryOptions = {}
+) {
+  const shouldHideAnalysisMaster = options.excludeAnalysisMaster ?? true;
+  const cacheKey = userId ? `task-stats:${userId}:${viewMode}:${shouldHideAnalysisMaster ? 'hide-analysis' : 'show-analysis'}` : null;
   
   const { data, error, isLoading, mutate } = useSWR<{ stats: { total: number; pending: number; running: number; retrying: number; success: number; failed: number }; isAdmin: boolean }>(
     cacheKey,
-    () => getQueueStats(viewMode),
+    () => getQueueStats(viewMode, options),
     {
       refreshInterval: 3000, // 每3秒自动刷新（加快频率）
       revalidateOnFocus: true, // 窗口聚焦时刷新
