@@ -114,6 +114,7 @@ export async function GET(
         temperature: 0.3,
         topP: 0.9,
         maxOutputTokens: 32768,
+        response_mime_type: 'application/json',
       },
     };
 

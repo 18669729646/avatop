@@ -232,6 +232,7 @@ async function callGeminiWithParts(
         temperature: 0.3,
         topP: 0.9,
         maxOutputTokens: 32768,
+        response_mime_type: 'application/json',
       },
     }),
     signal: AbortSignal.timeout(10 * 60 * 1000),
