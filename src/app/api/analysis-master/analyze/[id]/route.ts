@@ -5,6 +5,64 @@ import { checkUserCredits, getCreditPrice } from '@/lib/credits';
 import { logApiError, logInfo } from '@/lib/logger';
 import { ANALYSIS_MASTER_ACTION_TYPE } from '@/lib/analysis-master';
 
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const auth = await authenticateRequest(request);
+    if (!auth.success) {
+      return unauthorizedResponse(auth.error, auth.status);
+    }
+
+    const projectId = (await params).id;
+    const client = getSupabaseClient();
+
+    const { data: project, error: projectError } = await client
+      .from('analysis_master_projects')
+      .select('*')
+      .eq('id', projectId)
+      .eq('user_id', auth.userId)
+      .single();
+
+    if (projectError || !project) {
+      return NextResponse.json({ error: '项目不存在' }, { status: 404 });
+    }
+
+    if (!project.video_key && !project.video_url) {
+      return NextResponse.json({ error: '项目缺少视频文件' }, { status: 400 });
+    }
+
+    const price = await getCreditPrice(ANALYSIS_MASTER_ACTION_TYPE);
+    const creditCheck = await checkUserCredits(auth.userId, price?.creditsRequired ?? 0);
+
+    const { data: promptRows } = await client
+      .from('system_prompt_config')
+      .select('system_prompt, variables_used')
+      .eq('id', ANALYSIS_MASTER_ACTION_TYPE)
+      .maybeSingle();
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        projectId,
+        projectName: project.name,
+        videoKey: project.video_key,
+        videoUrl: project.video_url,
+        status: project.status,
+        creditPrice: price?.creditsRequired ?? 0,
+        userCredits: creditCheck.balance,
+        hasEnoughCredits: creditCheck.hasEnough,
+        promptTemplate: promptRows?.system_prompt ?? null,
+        promptVariables: promptRows?.variables_used ?? null,
+      },
+    });
+  } catch (error) {
+    logApiError('analysis-master/analyze', 'GET preview', error, {}, '');
+    return NextResponse.json({ error: '预览失败' }, { status: 500 });
+  }
+}
+
 function createTaskId(projectId: string): string {
   return `analysis-${projectId}-${Date.now()}`;
 }

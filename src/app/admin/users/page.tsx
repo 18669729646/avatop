@@ -145,6 +145,7 @@ export default function UserManagementPage() {
       images: { count: number; mb: number; percent: number };
       videos: { count: number; mb: number; percent: number };
       characters: { count: number; mb: number; percent: number };
+      analysisMaster: { count: number; mb: number; percent: number };
     };
   } | null>(null);
 
@@ -806,11 +807,19 @@ export default function UserManagementPage() {
                       <p className="font-medium">{storageDetail.breakdown.characters.mb.toFixed(1)} MB</p>
                       <p className="text-xs text-muted-foreground">{storageDetail.breakdown.characters.count} 个文件 ({storageDetail.breakdown.characters.percent}%)</p>
                     </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1 text-muted-foreground mb-1">
+                        <Video className="w-3 h-3" />
+                        <span>分析大师</span>
+                      </div>
+                      <p className="font-medium">{storageDetail.breakdown.analysisMaster.mb.toFixed(1)} MB</p>
+                      <p className="text-xs text-muted-foreground">{storageDetail.breakdown.analysisMaster.count} 个文件 ({storageDetail.breakdown.analysisMaster.percent}%)</p>
+                    </div>
                   </div>
                 </div>
               </div>
             )}
-            
+
             {/* 操作记录列表 */}
             <h4 className="font-medium mb-2">操作记录</h4>
             {activityLoading ? (

@@ -1719,6 +1719,14 @@ async function executeAnalysisTask(task: QueueTask, supabase: ReturnType<typeof 
     throw new Error('无法生成视频访问地址');
   }
 
+  // 推送 started 事件，前端立即感知分析开始
+  broadcastTaskUpdate({
+    taskId: task.id,
+    type: 'analysis',
+    status: 'started',
+    projectId,
+  });
+
   const videoResponse = await fetch(videoUrl, {
     signal: AbortSignal.timeout(120 * 1000),
     // @ts-expect-error - Node.js undici Agent
@@ -1781,6 +1789,7 @@ async function executeAnalysisTask(task: QueueTask, supabase: ReturnType<typeof 
   await supabase
     .from('analysis_master_projects')
     .update({
+      name: result.summary || project.name,
       status: 'completed',
       result,
       error: null,
@@ -1808,6 +1817,15 @@ async function executeAnalysisTask(task: QueueTask, supabase: ReturnType<typeof 
     status: 'success',
     projectId,
     result: {
+      summary: result.summary,
+      imagePrompt: result.imagePrompt,
+      videoPrompt: result.videoPrompt,
+      dialogue_vo_original: result.dialogue_vo_original,
+      dialogue_vo_zh: result.dialogue_vo_zh,
+      cta_a: result.cta_a,
+      cta_b: result.cta_b,
+      cta_c: result.cta_c,
+      cta_d: result.cta_d,
       scenesCount: result.scenes.length,
     },
   });

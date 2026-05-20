@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS analysis_master_projects (
   updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
 
+ALTER TABLE analysis_master_projects DISABLE ROW LEVEL SECURITY;
+
 CREATE INDEX IF NOT EXISTS analysis_master_projects_user_idx
   ON analysis_master_projects(user_id, updated_at);
 

@@ -47,6 +47,16 @@ export interface TaskEventData {
       backgroundMusic?: string;
     }>;
     rawResponse?: string;
+    // 分析大师结果字段
+    summary?: string;
+    imagePrompt?: string;
+    videoPrompt?: string;
+    dialogue_vo_original?: string;
+    dialogue_vo_zh?: string;
+    cta_a?: string;
+    cta_b?: string;
+    cta_c?: string;
+    cta_d?: string;
   };
   error?: string;
   progress?: number;

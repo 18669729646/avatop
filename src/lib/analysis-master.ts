@@ -26,6 +26,14 @@ export interface AnalysisMasterResult {
   targetAudience: string;
   sellingPoints: string[];
   scenes: AnalysisScene[];
+  imagePrompt: string;
+  videoPrompt: string;
+  dialogue_vo_original: string;
+  dialogue_vo_zh: string;
+  cta_a: string;
+  cta_b: string;
+  cta_c: string;
+  cta_d: string;
   raw: Record<string, unknown>;
 }
 
@@ -84,16 +92,24 @@ export function normalizeAnalysisResult(raw: Record<string, unknown>): AnalysisM
   });
 
   return {
-    summary: String(raw.summary || ''),
+    summary: String(raw.summary || raw.name || raw.title || ''),
     videoType: String(raw.videoType || raw.video_type || ''),
     targetAudience: String(raw.targetAudience || raw.target_audience || ''),
     sellingPoints: normalizeStringArray(raw.sellingPoints || raw.selling_points),
     scenes,
+    imagePrompt: String(raw.imagePrompt || raw.image_prompt || ''),
+    videoPrompt: String(raw.videoPrompt || raw.video_prompt || ''),
+    dialogue_vo_original: String(raw.dialogue_vo_original || raw.dialogue_vo || raw.speech_text || ''),
+    dialogue_vo_zh: String(raw.dialogue_vo_zh || raw.dialogue_vo_zh_CN || ''),
+    cta_a: String(raw.cta_a || ''),
+    cta_b: String(raw.cta_b || ''),
+    cta_c: String(raw.cta_c || ''),
+    cta_d: String(raw.cta_d || ''),
     raw,
   };
 }
 
-async function getAnalysisMasterPrompt(context: AnalysisPromptContext): Promise<string> {
+export async function getAnalysisMasterPrompt(context: AnalysisPromptContext): Promise<string> {
   let template = '';
   try {
     const client = getSupabaseClient();
@@ -152,79 +168,33 @@ async function callGeminiWithParts(
   return normalizeAnalysisResult(extractJsonObject(text));
 }
 
-async function uploadVideoToGemini(
-  basePath: string,
-  apiKey: string,
-  videoBuffer: Buffer,
-  mimeType: string,
-): Promise<{ fileUri: string; fileName: string }> {
-  const uploadBase = basePath.replace('/v1beta', '');
-  const startResponse = await fetch(`${uploadBase}/upload/v1beta/files`, {
-    method: 'POST',
-    headers: {
-      'x-goog-api-key': apiKey,
-      'X-Goog-Upload-Protocol': 'resumable',
-      'X-Goog-Upload-Command': 'start',
-      'X-Goog-Upload-Header-Content-Length': String(videoBuffer.length),
-      'X-Goog-Upload-Header-Content-Type': mimeType,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ file: { display_name: `analysis_master_${Date.now()}` } }),
-  });
+async function compressVideoForAnalysis(videoBuffer: Buffer): Promise<Buffer> {
+  const { execFile } = require('child_process');
+  const { promisify } = require('util');
+  const execFileAsync = promisify(execFile);
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
 
-  if (!startResponse.ok) {
-    throw new Error(`启动 Gemini File API 上传失败: ${startResponse.status}`);
-  }
-
-  const uploadUrl = startResponse.headers.get('x-goog-upload-url');
-  if (!uploadUrl) {
-    throw new Error('Gemini File API 未返回上传地址');
-  }
-
-  const uploadResponse = await fetch(uploadUrl, {
-    method: 'PUT',
-    headers: {
-      'Content-Length': String(videoBuffer.length),
-      'X-Goog-Upload-Offset': '0',
-      'X-Goog-Upload-Command': 'upload, finalize',
-      'Content-Type': mimeType,
-    },
-    body: new Uint8Array(videoBuffer),
-  });
-
-  if (!uploadResponse.ok) {
-    throw new Error(`Gemini File API 上传视频失败: ${uploadResponse.status}`);
-  }
-
-  const uploadResult = await uploadResponse.json();
-  const fileName = uploadResult.file?.name;
-  const fileUri = uploadResult.file?.uri;
-  if (!fileName || !fileUri) {
-    throw new Error('Gemini File API 响应缺少文件信息');
-  }
+  const inputPath = path.join(os.tmpdir(), `am-compress-input-${Date.now()}.mp4`);
+  const outputPath = path.join(os.tmpdir(), `am-compress-output-${Date.now()}.mp4`);
 
   try {
-    for (let attempt = 0; attempt < 60; attempt++) {
-      await new Promise(resolve => setTimeout(resolve, 5000));
-      const pollResponse = await fetch(`${basePath}/${fileName}`, {
-        headers: { 'x-goog-api-key': apiKey },
-      });
+    fs.writeFileSync(inputPath, videoBuffer);
+    await execFileAsync('ffmpeg', [
+      '-i', inputPath,
+      '-vf', 'scale=480:-2',
+      '-crf', '28',
+      '-preset', 'fast',
+      '-movflags', '+faststart',
+      '-y',
+      outputPath,
+    ], { timeout: 120000 });
 
-      if (!pollResponse.ok) continue;
-      const pollData = await pollResponse.json();
-      if (pollData.state === 'ACTIVE') return { fileUri, fileName };
-      if (pollData.state === 'FAILED') {
-        throw new Error(`Gemini 视频处理失败: ${pollData.error?.message || '未知错误'}`);
-      }
-    }
-
-    throw new Error('Gemini 视频处理超时');
-  } catch (error) {
-    await fetch(`${basePath}/${fileName}`, {
-      method: 'DELETE',
-      headers: { 'x-goog-api-key': apiKey },
-    }).catch(() => undefined);
-    throw error;
+    return fs.readFileSync(outputPath);
+  } finally {
+    try { fs.unlinkSync(inputPath); } catch {}
+    try { fs.unlinkSync(outputPath); } catch {}
   }
 }
 
@@ -238,40 +208,19 @@ export async function analyzeVideoBufferWithGemini(
     throw new Error('未配置文本模型');
   }
 
-  const basePath = apiConfig.baseUrl.endsWith('/v1beta') ? apiConfig.baseUrl : `${apiConfig.baseUrl}/v1beta`;
   const prompt = await getAnalysisMasterPrompt(context);
+  // 所有视频统一用 ffmpeg 压缩降分辨率，减少 token 消耗
+  console.log(`[Analysis Master] 原始视频 ${videoBuffer.length} bytes，使用 ffmpeg 压缩...`);
+  const bufferToSend = await compressVideoForAnalysis(videoBuffer);
+  console.log(`[Analysis Master] 压缩后 ${bufferToSend.length} bytes`);
 
-  if (videoBuffer.length < 15 * 1024 * 1024) {
-    try {
-      return await callGeminiWithParts(apiConfig, [
-        { text: prompt },
-        {
-          inline_data: {
-            mime_type: mimeType,
-            data: videoBuffer.toString('base64'),
-          },
-        },
-      ]);
-    } catch (error) {
-      console.warn('[Analysis Master] inline video failed, fallback to File API:', (error as Error).message);
-    }
-  }
-
-  const uploaded = await uploadVideoToGemini(basePath, apiConfig.apiKey, videoBuffer, mimeType);
-  try {
-    return await callGeminiWithParts(apiConfig, [
-      { text: prompt },
-      {
-        file_data: {
-          mime_type: mimeType,
-          file_uri: uploaded.fileUri,
-        },
+  return await callGeminiWithParts(apiConfig, [
+    { text: prompt },
+    {
+      inline_data: {
+        mime_type: mimeType,
+        data: bufferToSend.toString('base64'),
       },
-    ]);
-  } finally {
-    await fetch(`${basePath}/${uploaded.fileName}`, {
-      method: 'DELETE',
-      headers: { 'x-goog-api-key': apiConfig.apiKey },
-    }).catch(() => undefined);
-  }
+    },
+  ]);
 }

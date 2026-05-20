@@ -53,6 +53,8 @@ export async function getUserStorageUsed(userId: string): Promise<number> {
         SELECT COALESCE(file_size, 0) as file_size FROM character_library WHERE user_id = $1
         UNION ALL
         SELECT COALESCE(file_size, 0) as file_size FROM analysis_master_projects WHERE user_id = $1
+        UNION ALL
+        SELECT COALESCE(audio_file_size, 0) as file_size FROM analysis_master_projects WHERE user_id = $1
       ) combined
     `, [userId]);
 

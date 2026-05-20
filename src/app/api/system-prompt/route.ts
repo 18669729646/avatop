@@ -167,11 +167,14 @@ export async function PUT(request: NextRequest) {
       );
     }
     
-    // 根据类型检查变量使用情况
-    const checkResult = checkVariablesByType(systemPrompt, type);
-    
-    // 如果缺少必需变量，返回错误
-    if (checkResult.missingRequired.length > 0) {
+    // video_remake 和 analysis_master 不做变量检查，直接保存
+    let checkResult = null;
+    if (type === 'shortfilm') {
+      checkResult = checkVariablesByType(systemPrompt, type);
+    }
+
+    // 如果缺少必需变量，返回错误（仅 shortfilm 检查）
+    if (checkResult && checkResult.missingRequired.length > 0) {
       const missingNames = checkResult.missingRequired.map(v => v.label).join('、');
       return NextResponse.json({
         success: false,
@@ -185,8 +188,8 @@ export async function PUT(request: NextRequest) {
       }, { status: 400 });
     }
     
-    // 如果有未知变量，返回警告
-    if (checkResult.unknownVariables.length > 0) {
+    // 如果有未知变量，返回警告（仅 shortfilm 检查）
+    if (checkResult && checkResult.unknownVariables.length > 0) {
       return NextResponse.json({
         success: false,
         error: `存在未知的变量：${checkResult.unknownVariables.join('、')}`,
@@ -201,7 +204,7 @@ export async function PUT(request: NextRequest) {
         success: false,
         needsConfirm: true,
         message: '请确认保存此模板',
-        checkResult: {
+        checkResult: checkResult ? {
           usedRequired: checkResult.usedRequired.map(v => ({
             name: v.name,
             label: v.label,
@@ -214,10 +217,10 @@ export async function PUT(request: NextRequest) {
             name: v.name,
             label: v.label,
           })),
-        },
+        } : null,
         stats: {
           totalChars: systemPrompt.length,
-          variableCount: checkResult.usedRequired.length + checkResult.usedOptional.length,
+          variableCount: checkResult ? checkResult.usedRequired.length + checkResult.usedOptional.length : 0,
         },
       }, { status: 200 });
     }
@@ -322,9 +325,9 @@ export async function POST(request: NextRequest) {
     
     const currentPrompt = currentConfig.system_prompt;
     
-    // 检查变量是否完整
+    // 仅 shortfilm 检查变量完整性
     const checkResult = checkVariablesByType(currentPrompt, type);
-    if (checkResult.missingRequired.length > 0) {
+    if (['shortfilm'].includes(type) && checkResult.missingRequired.length > 0) {
       const missingNames = checkResult.missingRequired.map(v => v.label).join('、');
       return NextResponse.json(
         { success: false, error: `当前模板缺少必需变量：${missingNames}` },

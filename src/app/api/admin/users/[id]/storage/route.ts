@@ -52,14 +52,24 @@ export async function GET(
       FROM character_library WHERE user_id = $1
     `, [userId]);
 
+    // 获取分析大师存储
+    const analysisMasterResult = await pool.query(`
+      SELECT
+        COUNT(*) as count,
+        COALESCE(SUM(file_size), 0) as total_size
+      FROM analysis_master_projects WHERE user_id = $1
+    `, [userId]);
+
     const imageData = imageResult.rows[0];
     const videoData = videoResult.rows[0];
     const characterData = characterResult.rows[0];
+    const analysisMasterData = analysisMasterResult.rows[0];
 
     const imageBytes = parseInt(imageData?.total_size) || 0;
     const videoBytes = parseInt(videoData?.total_size) || 0;
     const characterBytes = 0;
-    const totalBytes = imageBytes + videoBytes + characterBytes;
+    const analysisMasterBytes = parseInt(analysisMasterData?.total_size) || 0;
+    const totalBytes = imageBytes + videoBytes + characterBytes + analysisMasterBytes;
     const totalMB = totalBytes / (1024 * 1024);
     const quotaBytes = quotaMB * 1024 * 1024;
 
@@ -90,6 +100,12 @@ export async function GET(
             bytes: characterBytes,
             mb: Math.round((characterBytes / (1024 * 1024)) * 100) / 100,
             percent: totalBytes > 0 ? Math.round((characterBytes / totalBytes) * 100) : 0,
+          },
+          analysisMaster: {
+            count: parseInt(analysisMasterData?.count) || 0,
+            bytes: analysisMasterBytes,
+            mb: Math.round((analysisMasterBytes / (1024 * 1024)) * 100) / 100,
+            percent: totalBytes > 0 ? Math.round((analysisMasterBytes / totalBytes) * 100) : 0,
           },
         },
       },

@@ -124,10 +124,23 @@ function getOrCreateEventSource(): EventSource | null {
         return;
       }
       
-      // readyState === 0 (CONNECTING) 表示 EventSource 正在自动重连
-      // 不要主动关闭，让 EventSource 自己的重连机制处理
-      // 只记录日志，不干预
-      devLog('[SSE] 连接中断，EventSource 正在自动重连');
+      // readyState === 0 (CONNECTING) 且之前已建立过连接
+      // 说明连接被异常关闭后 EventSource 在自动重连
+      // 关闭自动重连，改用我们的指数退避重连逻辑，避免无限快速重连
+      if (readyState === EventSource.CONNECTING && connectionEstablished) {
+        devLog('[SSE] 连接异常中断，关闭自动重连，改用指数退避');
+        eventSource.close();
+        globalEventSource = null;
+        connectionEstablished = false;
+        globalConnectionStatus = 'error';
+        notifyStatusListeners();
+        scheduleReconnect();
+        return;
+      }
+      
+      // readyState === 0 (CONNECTING) 且从未建立过连接
+      // 说明是首次连接失败，让 EventSource 自动重连
+      devLog('[SSE] 首次连接失败，等待 EventSource 自动重连');
     };
 
     globalEventSource = eventSource;
@@ -272,9 +285,10 @@ export function useTaskEvents(
       statusListeners.delete(wrappedStatusCallback);
       devLog('[SSE] 移除监听器, 剩余监听器数量:', listeners.size, 'mountCount:', mountCount);
 
-      // 延迟关闭连接，避免 React 严格模式的双重渲染问题
+      // 延迟关闭连接，避免页面导航和 React 严格模式导致频繁断开重连
+      // 使用较长的延迟（5秒），确保新页面有足够时间挂载并注册监听器
       if (mountCount === 0 && globalEventSource) {
-        devLog('[SSE] 设置延迟关闭定时器 (100ms)');
+        devLog('[SSE] 设置延迟关闭定时器 (5s)');
         closeTimer = setTimeout(() => {
           devLog('[SSE] 延迟关闭定时器触发, mountCount:', mountCount);
           if (mountCount === 0 && globalEventSource) {
@@ -285,7 +299,7 @@ export function useTaskEvents(
             closeEventSource();
           }
           closeTimer = null;
-        }, 100);
+        }, 5000);
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -61,7 +61,13 @@ export function PromptEditor({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // 实时检查变量（使用 useMemo）
-  const checkResult = useMemo(() => checkVariablesByType(prompt, type), [prompt, type]);
+  // video_remake 和 analysis_master 不做变量检查
+  const checkResult = useMemo(() => {
+    if (type === 'shortfilm') {
+      return checkVariablesByType(prompt, type);
+    }
+    return null;
+  }, [prompt, type]);
 
   // 保存处理
   const handleSave = useCallback(async () => {
@@ -95,7 +101,7 @@ export function PromptEditor({
 
   return (
     <div className="space-y-4">
-      {/* 变量检查状态 */}
+      {/* 变量检查状态（仅短片脚本需要检查） */}
       {checkResult && (
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm text-muted-foreground">变量检查：</span>
@@ -167,11 +173,12 @@ export function PromptEditor({
         <Button
           size="sm"
           onClick={() => {
-            if (checkResult && checkResult.isValid) {
-              setShowSaveConfirm(true);
+            if (type === 'shortfilm' && checkResult && !checkResult.isValid) {
+              return;
             }
+            setShowSaveConfirm(true);
           }}
-          disabled={isSaving || (checkResult !== null && !checkResult.isValid)}
+          disabled={isSaving || (type === 'shortfilm' && checkResult !== null && !checkResult.isValid)}
         >
           {isSaving ? (
             <>
