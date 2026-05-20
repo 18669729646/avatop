@@ -321,25 +321,6 @@ export async function getQueueStats(
   options: QueueQueryOptions = {}
 ): Promise<{ stats: QueueStats; isAdmin: boolean }> {
   try {
-    const shouldExcludeAnalysisMaster = options.excludeAnalysisMaster ?? true;
-    if (shouldExcludeAnalysisMaster) {
-      const queue = await getTaskQueue(viewMode, options);
-      const stats = queue.tasks.reduce<QueueStats>((acc, task) => {
-        acc.total += 1;
-        if (task.status === 'pending') acc.pending += 1;
-        else if (task.status === 'running') acc.running += 1;
-        else if (task.status === 'retrying') acc.retrying += 1;
-        else if (task.status === 'success') acc.success += 1;
-        else if (task.status === 'failed') acc.failed += 1;
-        return acc;
-      }, { total: 0, pending: 0, running: 0, retrying: 0, success: 0, failed: 0 });
-
-      return {
-        stats,
-        isAdmin: queue.isAdmin,
-      };
-    }
-
     const params = buildQueueStatsSearchParams(viewMode, options);
     const response = await authFetch(`/api/tasks/batch?${params.toString()}`);
     const data = await response.json();
