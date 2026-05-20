@@ -63,8 +63,15 @@ async function createFromLink(userId: string, body: Record<string, unknown>) {
       sourceUrl: String(body.sourceUrl || body.url || ''),
       name: typeof body.name === 'string' && body.name.trim() ? body.name.trim() : undefined,
       importMetadata: body.importMetadata as Record<string, string> | undefined,
+      clientRequestId: typeof body.clientRequestId === 'string' ? body.clientRequestId : undefined,
     });
-    return NextResponse.json({ success: true, data: project });
+    return NextResponse.json({
+      success: true,
+      data: {
+        ...project,
+        clientRequestId: typeof body.clientRequestId === 'string' ? body.clientRequestId : undefined,
+      },
+    });
   } catch (error) {
     if (error instanceof AnalysisMasterProjectError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

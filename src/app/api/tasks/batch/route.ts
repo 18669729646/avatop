@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { authenticateRequest, unauthorizedResponse } from '@/lib/auth-middleware';
 import { broadcastTaskUpdate } from '@/lib/task-events';
@@ -6,6 +6,7 @@ import { s3Storage } from '@/lib/s3-client';
 import { isAdmin } from '@/lib/task-security';
 import { pool } from '@/lib/db-pool';
 import { logStorageError, logApiError, errorResponse } from '@/lib/logger';
+import { ANALYSIS_MASTER_TASK_TYPES } from '@/lib/task-types';
 
 function extractKeyFromUrl(url: string): string | null {
   if (!url) return null;
@@ -453,6 +454,7 @@ export async function GET(request: NextRequest) {
     const isUserAdmin = isAdmin(auth.payload.role);
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId'); // 管理员筛选特定用户
+    const excludeAnalysisMaster = searchParams.get('excludeAnalysisMaster') === 'true';
     
     // 使用 PostgreSQL 直接查询，管理员可查看所有
     let sqlQuery = `
@@ -471,6 +473,12 @@ export async function GET(request: NextRequest) {
       // 管理员可以筛选特定用户
       conditions.push(`user_id = $1`);
       params.push(userId);
+    }
+
+    if (excludeAnalysisMaster) {
+      const placeholders = ANALYSIS_MASTER_TASK_TYPES.map((_, index) => `$${index + 1}`).join(', ');
+      conditions.push(`type NOT IN (${placeholders})`);
+      params.push(...ANALYSIS_MASTER_TASK_TYPES);
     }
     
     if (conditions.length > 0) {

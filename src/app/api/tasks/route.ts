@@ -1,9 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { authenticateRequest, unauthorizedResponse } from '@/lib/auth-middleware';
 import { checkStorageQuota } from '@/lib/storage-quota';
 import { filterSensitiveParams, filterTasksForUser, isAdmin } from '@/lib/task-security';
 import { pool } from '@/lib/db-pool';
+import { ANALYSIS_MASTER_TASK_TYPES } from '@/lib/task-types';
 
 // 任务列表返回类型（包含用户信息）
 type TaskWithUser = {
@@ -42,6 +43,7 @@ export async function GET(request: NextRequest) {
     const type = searchParams.get('type');
     const userId = searchParams.get('userId'); // 管理员筛选特定用户
     const limit = parseInt(searchParams.get('limit') || '100');
+    const excludeAnalysisMaster = searchParams.get('excludeAnalysisMaster') === 'true';
     
     const isUserAdmin = isAdmin(auth.payload.role);
     
@@ -83,6 +85,12 @@ export async function GET(request: NextRequest) {
       conditions.push(`t.type = $${paramIndex}`);
       params.push(type);
       paramIndex++;
+    }
+
+    if (excludeAnalysisMaster) {
+      const placeholders = ANALYSIS_MASTER_TASK_TYPES.map(() => `$${paramIndex++}`).join(', ');
+      conditions.push(`t.type NOT IN (${placeholders})`);
+      params.push(...ANALYSIS_MASTER_TASK_TYPES);
     }
     
     if (conditions.length > 0) {
