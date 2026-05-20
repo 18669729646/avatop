@@ -3,6 +3,7 @@ import { checkStorageQuota } from '@/lib/storage-quota';
 import { s3Storage } from '@/lib/s3-client';
 import { URL_EXPIRE_TIME } from '@/lib/storage-types';
 import { downloadVideoFromUrl } from '@/lib/video-downloader';
+import { extractAudioFromBuffer } from '@/app/api/analysis-master/upload/extract-audio';
 import { logApiError, logInfo } from '@/lib/logger';
 
 export const ANALYSIS_MAX_VIDEO_BYTES = 100 * 1024 * 1024;
@@ -31,6 +32,10 @@ export function mapAnalysisMasterProject(row: Record<string, unknown>) {
     videoUrl: row.video_url,
     videoDuration: row.video_duration,
     fileSize: row.file_size,
+    audioKey: row.audio_key,
+    audioUrl: row.audio_url,
+    audioDuration: row.audio_duration,
+    audioFileSize: row.audio_file_size,
     status: row.status,
     result: row.result,
     error: row.error,
@@ -82,6 +87,7 @@ export async function createAnalysisProjectFromLink(params: {
       fileName: `analysis-master/source/${params.userId}/${projectId}.mp4`,
       contentType: downloaded.contentType,
     });
+    const audioResult = await extractAudioFromBuffer(downloaded.buffer, params.userId, projectId);
     const videoUrl = await s3Storage.generatePresignedUrl({
       key: videoKey,
       expireTime: URL_EXPIRE_TIME,
@@ -100,6 +106,10 @@ export async function createAnalysisProjectFromLink(params: {
         video_url: videoUrl,
         video_duration: downloaded.duration || null,
         file_size: downloaded.buffer.length,
+        audio_key: audioResult?.audioKey || null,
+        audio_url: audioResult?.audioUrl || null,
+        audio_duration: audioResult?.audioDuration || null,
+        audio_file_size: audioResult?.audioFileSize || 0,
         import_metadata: params.importMetadata || {},
         status: 'draft',
         updated_at: new Date().toISOString(),

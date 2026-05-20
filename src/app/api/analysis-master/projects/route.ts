@@ -4,15 +4,14 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { checkStorageQuota } from '@/lib/storage-quota';
 import { s3Storage } from '@/lib/s3-client';
 import { URL_EXPIRE_TIME } from '@/lib/storage-types';
-import { downloadVideoFromUrl } from '@/lib/video-downloader';
 import { extractAudioFromBuffer } from '../upload/extract-audio';
 import { logApiError, logInfo } from '@/lib/logger';
-
-const ANALYSIS_MAX_VIDEO_BYTES = 100 * 1024 * 1024;
-
-function createProjectId(): string {
-  return `am-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
+import {
+  ANALYSIS_MAX_VIDEO_BYTES,
+  AnalysisMasterProjectError,
+  createAnalysisProjectFromLink,
+  createAnalysisProjectId,
+} from '@/lib/analysis-master-projects';
 
 function mapProject(row: Record<string, unknown>) {
   return {
@@ -58,114 +57,20 @@ async function mapProjectWithFreshUrl(row: Record<string, unknown>) {
 }
 
 async function createFromLink(userId: string, body: Record<string, unknown>) {
-  const sourceUrl = String(body.sourceUrl || body.url || '').trim();
-  if (!sourceUrl) {
-    return NextResponse.json({ error: '请提供视频链接' }, { status: 400 });
-  }
-
-  const projectId = createProjectId();
-  const projectName = String(body.name || '分析大师项目');
-
-  // 1. 立即创建项目（状态：下载中），不等下载完成
-  const client = getSupabaseClient();
-  const { data: insertData, error: insertError } = await client
-    .from('analysis_master_projects')
-    .insert({
-      id: projectId,
-      user_id: userId,
-      name: projectName,
-      source_type: 'link',
-      source_url: sourceUrl,
-      status: 'downloading',
-      updated_at: new Date().toISOString(),
-    })
-    .select()
-    .single();
-
-  if (insertError) {
-    logApiError('analysis-master/projects', 'createFromLink insert', insertError, { projectId }, userId);
-    return NextResponse.json({ error: '创建分析项目失败' }, { status: 500 });
-  }
-
-  logInfo('api', '创建分析大师项目（下载中）', { projectId, sourceUrl }, userId);
-
-  // 2. 立即返回，不等下载完成
-  const immediateResult = mapProject(insertData);
-
-  // 3. 后台异步下载（响应发出后执行）
-  setImmediate(async () => {
-    try {
-      const downloaded = await downloadVideoFromUrl(sourceUrl, {
-        projectId,
-        provider: 'auto',
-        maxBytes: ANALYSIS_MAX_VIDEO_BYTES,
-      });
-
-      // 检查存储配额
-      const storageCheck = await checkStorageQuota(userId, downloaded.buffer.length);
-      if (!storageCheck.allowed) {
-        await client
-          .from('analysis_master_projects')
-          .update({ status: 'failed', error: storageCheck.error, updated_at: new Date().toISOString() })
-          .eq('id', projectId);
-        return;
-      }
-
-      // 上传到 S3
-      const videoKey = await s3Storage.uploadFile({
-        fileContent: downloaded.buffer,
-        fileName: `analysis-master/source/${userId}/${projectId}.mp4`,
-        contentType: downloaded.contentType,
-      });
-
-      // 生成预签名 URL
-      const videoUrl = await s3Storage.generatePresignedUrl({
-        key: videoKey,
-        expireTime: URL_EXPIRE_TIME,
-      });
-
-      // 提取音频
-      const audioResult = await extractAudioFromBuffer(downloaded.buffer, userId, projectId);
-
-      // 更新项目状态：下载完成
-      const { error: updateError } = await client
-        .from('analysis_master_projects')
-        .update({
-          status: 'draft',
-          video_key: videoKey,
-          video_url: videoUrl,
-          video_duration: downloaded.duration || null,
-          file_size: downloaded.buffer.length,
-          audio_key: audioResult?.audioKey || null,
-          audio_url: audioResult?.audioUrl || null,
-          audio_duration: audioResult?.audioDuration || null,
-          audio_file_size: audioResult?.audioFileSize || 0,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', projectId);
-
-      if (updateError) {
-        await s3Storage.deleteFile(videoKey).catch(() => false);
-        if (audioResult?.audioKey) await s3Storage.deleteFile(audioResult.audioKey).catch(() => false);
-        logApiError('analysis-master/projects', 'createFromLink update', updateError, { projectId }, userId);
-      } else {
-        logInfo('api', '分析大师视频下载完成', { projectId, provider: downloaded.provider }, userId);
-      }
-    } catch (err) {
-      logApiError('analysis-master/projects', 'createFromLink download', err, { projectId }, userId);
-      // 下载失败，更新状态
-      await client
-        .from('analysis_master_projects')
-        .update({
-          status: 'failed',
-          error: String(err),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', projectId);
+  try {
+    const project = await createAnalysisProjectFromLink({
+      userId,
+      sourceUrl: String(body.sourceUrl || body.url || ''),
+      name: typeof body.name === 'string' && body.name.trim() ? body.name.trim() : undefined,
+      importMetadata: body.importMetadata as Record<string, string> | undefined,
+    });
+    return NextResponse.json({ success: true, data: project });
+  } catch (error) {
+    if (error instanceof AnalysisMasterProjectError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
     }
-  });
-
-  return NextResponse.json({ success: true, data: immediateResult });
+    throw error;
+  }
 }
 
 async function createFromUpload(userId: string, request: NextRequest) {
@@ -183,12 +88,11 @@ async function createFromUpload(userId: string, request: NextRequest) {
     return NextResponse.json({ error: '视频文件不能超过 100MB' }, { status: 400 });
   }
 
-  const projectId = createProjectId();
+  const projectId = createAnalysisProjectId();
   const buffer = Buffer.from(await file.arrayBuffer());
   const extension = file.name.split('.').pop() || 'mp4';
   const videoKey = `analysis-master/source/${userId}/${projectId}.${extension}`;
 
-  // 先上传视频到 S3
   let uploadedVideoKey = '';
   let uploadedAudioKey = '';
   try {
@@ -202,7 +106,6 @@ async function createFromUpload(userId: string, request: NextRequest) {
     return NextResponse.json({ error: '上传视频失败' }, { status: 500 });
   }
 
-  // 提取音频
   let audioKey = '';
   let audioUrl = '';
   let audioDuration = 0;
@@ -217,15 +120,12 @@ async function createFromUpload(userId: string, request: NextRequest) {
       uploadedAudioKey = audioKey;
     }
   } catch (audioErr) {
-    // 音频提取失败不影响主流程，记录日志即可
     console.warn('[createFromUpload] 音频提取失败:', audioErr);
   }
 
-  // 检查存储配额（视频 + 音频）
   const totalSize = buffer.length + audioFileSize;
   const storageCheck = await checkStorageQuota(userId, totalSize);
   if (!storageCheck.allowed) {
-    // 清理已上传的 S3 文件
     await s3Storage.deleteFile(uploadedVideoKey).catch(() => false);
     if (uploadedAudioKey) {
       await s3Storage.deleteFile(uploadedAudioKey).catch(() => false);
@@ -260,7 +160,6 @@ async function createFromUpload(userId: string, request: NextRequest) {
     .single();
 
   if (error) {
-    // 清理已上传的 S3 文件
     await s3Storage.deleteFile(uploadedVideoKey).catch(() => false);
     if (uploadedAudioKey) {
       await s3Storage.deleteFile(uploadedAudioKey).catch(() => false);
@@ -285,8 +184,7 @@ export async function GET(request: NextRequest) {
       .from('analysis_master_projects')
       .select('*')
       .eq('user_id', auth.userId)
-      .order('updated_at', { ascending: false })
-      .limit(50);
+      .order('created_at', { ascending: false });
 
     if (error) {
       logApiError('analysis-master/projects', 'GET select', error, {}, auth.userId);
@@ -310,13 +208,13 @@ export async function POST(request: NextRequest) {
 
     const contentType = request.headers.get('content-type') || '';
     if (contentType.includes('multipart/form-data')) {
-      return await createFromUpload(auth.userId, request);
+      return createFromUpload(auth.userId, request);
     }
 
     const body = await request.json();
-    return await createFromLink(auth.userId, body);
+    return createFromLink(auth.userId, body);
   } catch (error) {
     logApiError('analysis-master/projects', 'POST', error);
-    return NextResponse.json({ error: '创建分析项目失败，请确认视频可访问后重试' }, { status: 500 });
+    return NextResponse.json({ error: '创建分析项目失败' }, { status: 500 });
   }
 }

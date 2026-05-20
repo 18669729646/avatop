@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { AppLayout } from '@/components/app-layout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,8 +14,9 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { authFetch, useAuth } from '@/lib/auth-context';
 import { useTaskEvents } from '@/hooks/use-task-events';
-import { Download, Loader2, Music, Play, RefreshCw, Sparkles, Upload, Copy, Trash2 } from 'lucide-react';
+import { Download, FileSpreadsheet, Loader2, Music, Play, RefreshCw, Sparkles, Upload, Copy, Trash2 } from 'lucide-react';
 import { copyToClipboard } from '@/lib/prompt-templates';
+import { useTaskQueue } from '@/lib/swr';
 
 const ANALYSIS_MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 
@@ -39,6 +41,35 @@ interface AnalysisScene {
   videoPrompt: string;
   speechText?: string;
   sellingPoint?: string;
+  dialogueVoOriginal?: string;
+  dialogueVoZh?: string;
+  ctaA?: string;
+  ctaB?: string;
+  ctaC?: string;
+  ctaD?: string;
+  actionScheduling?: string;
+  productDesc?: string;
+  mustShow?: string;
+  onScreenTextGraphics?: string;
+  cameraShotSize?: string;
+  cameraAngle?: string;
+  cameraMovement?: string;
+  compositionNotes?: string;
+  lightingAtmosphere?: string;
+  colorGrading?: string;
+  languageStyle?: string;
+  emphasisNotes?: string;
+  audioBgm?: string;
+  audioSfx?: string;
+  ambientSound?: string;
+  editingTransition?: string;
+  pacingNotes?: string;
+  filmingConstraints?: string;
+  constraintsCompliance?: string;
+  reverseConstraints?: string;
+  assetsNeeded?: string;
+  sentenceMapping?: string;
+  mappingNotes?: string;
 }
 
 interface AnalysisResult {
@@ -70,8 +101,29 @@ interface AnalysisProject {
   status: 'draft' | 'analyzing' | 'completed' | 'failed' | string;
   result?: AnalysisResult | null;
   error?: string | null;
+  importMetadata?: Record<string, string>;
   createdAt: string;
   updatedAt: string;
+}
+
+interface BatchImportSummary {
+  batchId: string;
+  taskId: string;
+  total: number;
+  limit: number;
+  status: string;
+}
+
+interface BatchImportTaskResult {
+  batchId: string;
+  sourceFileName?: string;
+  totalRows: number;
+  createdRows: number;
+  failedRows: number;
+  failedItems?: Array<{
+    sourceUrl: string;
+    error: string;
+  }>;
 }
 
 function formatSize(size?: number) {
@@ -88,9 +140,55 @@ const statusLabels: Record<string, string> = {
   completed: '已完成',
 };
 
+const batchStatusLabels: Record<string, string> = {
+  queued: '已入队',
+  pending: '排队中',
+  running: '处理中',
+  progress: '处理中',
+  retrying: '重试中',
+  success: '已完成',
+  failed: '失败',
+};
+
+function sceneDetailFields(scene: AnalysisScene) {
+  return [
+    ['台词原文', scene.dialogueVoOriginal],
+    ['台词中文', scene.dialogueVoZh],
+    ['钩子', scene.ctaA],
+    ['痛点场景', scene.ctaB],
+    ['卖点提炼', scene.ctaC],
+    ['转化 CTA', scene.ctaD],
+    ['动作调度', scene.actionScheduling],
+    ['产品描述', scene.productDesc],
+    ['必须展示', scene.mustShow],
+    ['屏幕文字', scene.onScreenTextGraphics],
+    ['景别', scene.cameraShotSize],
+    ['机位角度', scene.cameraAngle],
+    ['镜头运动', scene.cameraMovement],
+    ['构图', scene.compositionNotes],
+    ['灯光氛围', scene.lightingAtmosphere],
+    ['色调', scene.colorGrading],
+    ['语言风格', scene.languageStyle],
+    ['强调备注', scene.emphasisNotes],
+    ['背景音乐', scene.audioBgm],
+    ['音效', scene.audioSfx],
+    ['环境音', scene.ambientSound],
+    ['转场', scene.editingTransition],
+    ['节奏', scene.pacingNotes],
+    ['拍摄限制', scene.filmingConstraints],
+    ['合规性', scene.constraintsCompliance],
+    ['反向限制', scene.reverseConstraints],
+    ['素材需求', scene.assetsNeeded],
+    ['句子映射', scene.sentenceMapping],
+    ['映射备注', scene.mappingNotes],
+  ].filter(([, value]) => value);
+}
+
 export default function AnalysisMasterPage() {
+  const router = useRouter();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const { tasks: queueTasks } = useTaskQueue('mine', user?.id);
   const [projects, setProjects] = useState<AnalysisProject[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
   const [previewData, setPreviewData] = useState<Record<string, unknown> | null>(null);
@@ -100,13 +198,25 @@ export default function AnalysisMasterPage() {
   const [sourceUrl, setSourceUrl] = useState('');
   const [projectName, setProjectName] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  const [batchFile, setBatchFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const [batchImporting, setBatchImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [analyzingId, setAnalyzingId] = useState('');
   const [deletingId, setDeletingId] = useState('');
   const [uploadState, setUploadState] = useState<UploadState>({ phase: 'idle' });
   const [error, setError] = useState('');
+  const [batchSummary, setBatchSummary] = useState<BatchImportSummary | null>(null);
 
   const selectedProject = projects.find(project => project.id === selectedId) || projects[0];
+  const batchTask = batchSummary ? queueTasks.find(task => task.id === batchSummary.taskId) || null : null;
+  const batchTaskResult = batchTask?.result as BatchImportTaskResult | undefined;
+  const batchTotal = batchTaskResult?.totalRows ?? batchSummary?.total ?? 0;
+  const batchProcessed = batchTaskResult ? batchTaskResult.createdRows + batchTaskResult.failedRows : 0;
+  const batchProgress = batchTotal > 0
+    ? Math.min(100, Math.round((batchProcessed / batchTotal) * 100))
+    : 0;
+  const batchStatus = batchTask?.status || batchSummary?.status || 'queued';
 
   const loadProjects = useCallback(async () => {
     const response = await authFetch('/api/analysis-master/projects');
@@ -128,6 +238,29 @@ export default function AnalysisMasterPage() {
   useEffect(() => {
     loadProjectsRef.current().catch(err => setError(err.message));
   }, []);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem('analysis-master-batch-summary');
+      if (!saved) return;
+      const parsed = JSON.parse(saved) as BatchImportSummary;
+      if (parsed?.taskId && parsed?.batchId) {
+        setBatchSummary(parsed);
+      }
+    } catch {
+      window.localStorage.removeItem('analysis-master-batch-summary');
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (batchSummary) {
+        window.localStorage.setItem('analysis-master-batch-summary', JSON.stringify(batchSummary));
+      } else {
+        window.localStorage.removeItem('analysis-master-batch-summary');
+      }
+    } catch {}
+  }, [batchSummary]);
 
   // SSE 订阅：分析任务完成/失败时立即更新状态
   // 轮询仅作 SSE 断线兜底，降低频率避免页面抖动
@@ -270,7 +403,6 @@ export default function AnalysisMasterPage() {
           });
           throw new Error(`分片 ${i + 1}/${totalChunks} 上传失败: ${errData.error}`);
         }
-        const partData = await partRes.json();
         setUploadState({ phase: 'uploading', current: i + 1, total: totalChunks });
       }
 
@@ -294,6 +426,66 @@ export default function AnalysisMasterPage() {
       setError(err instanceof Error ? err.message : '上传失败');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const importFromExcel = async () => {
+    if (!batchFile) {
+      setError('请选择 Excel 文件');
+      return;
+    }
+
+    setBatchImporting(true);
+    setError('');
+    setBatchSummary(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', batchFile);
+      const response = await authFetch('/api/analysis-master/batch-import', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '批量导入失败');
+      setBatchSummary(data.data as BatchImportSummary);
+      setBatchFile(null);
+      await loadProjects();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '批量导入失败');
+    } finally {
+      setBatchImporting(false);
+    }
+  };
+
+  const exportProjects = async (projectIds?: string[]) => {
+    setExporting(true);
+    setError('');
+    try {
+      const response = await authFetch('/api/analysis-master/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectIds }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || '导出失败');
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get('content-disposition') || '';
+      const filename = disposition.match(/filename="([^"]+)"/)?.[1] || 'analysis-master-export.xlsx';
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '导出失败');
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -376,10 +568,16 @@ export default function AnalysisMasterPage() {
               <h1 className="text-lg sm:text-xl font-semibold">分析大师</h1>
               <Badge variant="secondary">{projects.length} 个项目</Badge>
             </div>
-            <Button variant="outline" size="sm" onClick={() => loadProjects()} disabled={loading}>
-              <RefreshCw className="w-4 h-4 mr-1" />
-              刷新
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => exportProjects()} disabled={exporting}>
+                {exporting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />}
+                导出
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => loadProjects()} disabled={loading}>
+                <RefreshCw className="w-4 h-4 mr-1" />
+                刷新
+              </Button>
+            </div>
           </div>
         </header>
 
@@ -422,6 +620,75 @@ export default function AnalysisMasterPage() {
                     )}
                   </div>
                   {error && <div className="text-sm text-destructive bg-destructive/10 rounded-md p-3">{error}</div>}
+                </CardContent>
+              </Card>
+
+              <Card className="shadow-sm">
+                <CardHeader>
+                  <CardTitle className="text-base">Excel 批量导入</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <Input type="file" accept=".xlsx,.xls" onChange={event => setBatchFile(event.target.files?.[0] || null)} />
+                  <Button variant="outline" className="w-full" onClick={importFromExcel} disabled={batchImporting || !batchFile}>
+                    {batchImporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileSpreadsheet className="w-4 h-4 mr-2" />}
+                    导入 Excel
+                  </Button>
+                  {batchSummary && (
+                    <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground space-y-1">
+                      <div>已加入后台队列，识别 {batchSummary.total} 条</div>
+                      <div>批次 ID：{batchSummary.batchId}</div>
+                      <div className="text-primary">系统会自动创建项目并进入分析队列</div>
+                    </div>
+                  )}
+                  {batchSummary && (
+                    <div className="rounded-md border bg-background p-3 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-sm font-medium">批量导入任务</div>
+                        <Badge variant={batchStatus === 'failed' ? 'destructive' : batchStatus === 'success' ? 'default' : 'secondary'}>
+                          {batchStatusLabels[batchStatus] || batchStatus}
+                        </Badge>
+                      </div>
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-purple-600 to-pink-600 transition-all"
+                          style={{ width: `${batchProgress}%` }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>进度 {batchProgress}%</span>
+                        <span>已导入 {batchProcessed}/{batchTotal} 条</span>
+                      </div>
+                      <div className="rounded-lg border bg-muted/30 p-3 text-xs space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-muted-foreground">成功</span>
+                          <span className="font-medium text-foreground">{batchTaskResult?.createdRows ?? 0}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-muted-foreground">失败</span>
+                          <span className="font-medium text-foreground">{batchTaskResult?.failedRows ?? 0}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-muted-foreground">状态</span>
+                          <span className="font-medium text-foreground">{batchStatusLabels[batchStatus] || batchStatus}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-muted-foreground">总条数</span>
+                          <span className="font-medium text-foreground">{batchTotal}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-muted-foreground">已处理</span>
+                          <span className="font-medium text-foreground">{batchProcessed}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-muted-foreground">批次编号</span>
+                          <span className="font-medium text-foreground break-all text-right">{batchSummary.batchId}</span>
+                        </div>
+                      </div>
+                      <Button variant="ghost" size="sm" className="w-full" onClick={() => router.push('/queue')}>
+                        前往任务队列
+                      </Button>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -483,14 +750,20 @@ export default function AnalysisMasterPage() {
                           <CardTitle>{selectedProject.name}</CardTitle>
                           <div className="text-sm text-muted-foreground mt-1">{statusLabels[selectedProject.status] || selectedProject.status} · {formatSize(selectedProject.fileSize)}</div>
                         </div>
-                        <Button
-                          className={selectedProject.status === 'failed' ? 'bg-red-600 hover:bg-red-700' : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700'}
-                          onClick={() => analyzeProject(selectedProject.id)}
-                          disabled={analyzingId === selectedProject.id || selectedProject.status === 'analyzing'}
-                        >
-                          {analyzingId === selectedProject.id || selectedProject.status === 'analyzing' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
-                          {selectedProject.status === 'failed' ? '重新分析' : '开始分析'}
-                        </Button>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <Button variant="outline" onClick={() => exportProjects([selectedProject.id])} disabled={exporting || !selectedProject.result}>
+                            {exporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+                            导出结果
+                          </Button>
+                          <Button
+                            className={selectedProject.status === 'failed' ? 'bg-red-600 hover:bg-red-700' : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700'}
+                            onClick={() => analyzeProject(selectedProject.id)}
+                            disabled={analyzingId === selectedProject.id || selectedProject.status === 'analyzing'}
+                          >
+                            {analyzingId === selectedProject.id || selectedProject.status === 'analyzing' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+                            {selectedProject.status === 'failed' ? '重新分析' : '开始分析'}
+                          </Button>
+                        </div>
                       </div>
                     </CardHeader>
                     <CardContent className="space-y-4">
@@ -562,6 +835,19 @@ export default function AnalysisMasterPage() {
                           <div className="grid gap-3 sm:grid-cols-2">
                             <div><span className="font-medium">口播：</span>{scene.speechText || '无'}</div>
                             <div><span className="font-medium">卖点：</span>{scene.sellingPoint || '无'}</div>
+                          </div>
+                        )}
+                        {sceneDetailFields(scene).length > 0 && (
+                          <div className="rounded-md border">
+                            <div className="border-b px-3 py-2 font-medium">分镜细节</div>
+                            <div className="grid gap-0 sm:grid-cols-2">
+                              {sceneDetailFields(scene).map(([label, value]) => (
+                                <div key={label} className="border-b px-3 py-2 last:border-b-0 sm:odd:border-r">
+                                  <div className="text-xs text-muted-foreground mb-1">{label}</div>
+                                  <div className="whitespace-pre-wrap">{value}</div>
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         )}
                       </CardContent>
