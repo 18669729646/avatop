@@ -241,7 +241,6 @@ export default function AnalysisMasterPage() {
   const [serverProjects, setServerProjects] = useState<AnalysisProject[]>([]);
   const [draftProjects, setDraftProjects] = useState<AnalysisMasterDraftProject[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [previewData, setPreviewData] = useState<Record<string, unknown> | null>(null);
   const [previewProjectId, setPreviewProjectId] = useState<string>('');
   const [showPreview, setShowPreview] = useState(false);
@@ -709,9 +708,9 @@ export default function AnalysisMasterPage() {
               <Badge variant="secondary">{displayedProjectCount || projects.length} 个项目</Badge>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => exportProjects(Array.from(selectedIds))} disabled={exporting}>
+              <Button variant="outline" size="sm" onClick={() => exportProjects()} disabled={exporting}>
                 {exporting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />}
-                {selectedIds.size > 0 ? `导出已选 (${selectedIds.size})` : '导出已完成'}
+                批量导出
               </Button>
               <Button variant="outline" size="sm" onClick={() => loadProjects(projectPagination.page).catch(err => setError(err.message))} disabled={loading}>
                 <RefreshCw className="w-4 h-4 mr-1" />
@@ -837,85 +836,46 @@ export default function AnalysisMasterPage() {
                   <CardTitle className="text-base">历史项目</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  {projects.length > 0 && (
-                    <div className="flex items-center gap-2 px-1">
-                      <Checkbox
-                        checked={projects.length > 0 && selectedIds.size === projects.length}
-                        onCheckedChange={(checked) => {
-                          if (checked) {
-                            setSelectedIds(new Set(projects.map(p => p.id)));
-                          } else {
-                            setSelectedIds(new Set());
-                          }
-                        }}
-                      />
-                      <span className="text-xs text-muted-foreground">全选</span>
-                      {selectedIds.size > 0 && (
-                        <button
-                          className="ml-auto text-xs text-muted-foreground/50 hover:text-destructive transition"
-                          onClick={() => setSelectedIds(new Set())}
-                        >
-                          取消
-                        </button>
-                      )}
-                    </div>
-                  )}
                   {projects.length === 0 ? (
                     <div className="text-sm text-muted-foreground py-6 text-center">暂无分析项目</div>
                   ) : projects.map(project => (
                     <div key={project.id} className={`group relative rounded-lg border p-3 hover:bg-muted transition cursor-pointer ${selectedProject?.id === project.id ? 'border-primary bg-muted/60' : ''}`} onClick={() => setSelectedId(project.id)}>
-                          <div className="flex items-start gap-2">
-                            <Checkbox
-                              checked={selectedIds.has(project.id)}
-                              onCheckedChange={(checked) => {
-                                setSelectedIds(prev => {
-                                  const next = new Set(prev);
-                                  if (checked) next.add(project.id);
-                                  else next.delete(project.id);
-                                  return next;
-                                });
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="text-sm font-medium truncate flex-1 min-w-0">{project.name}</div>
-                                <Badge
-                                  variant={getProjectBadgeVariant(project)}
-                                  className={`shrink-0 ${project.status === 'completed' ? 'bg-emerald-500/20 text-emerald-600 border-emerald-500/30' : ''}`}
-                                >
-                                  {getProjectStatusLabel(project)}
-                                </Badge>
-                              </div>
-                            </div>
-                            <div className="text-xs text-muted-foreground mt-1">{project.sourceType} · {formatSize(project.fileSize)}</div>
-                            {project.sourceUrl && (
-                              <a
-                                href={project.sourceUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-xs text-primary/70 hover:text-primary hover:underline truncate block mt-1"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                {project.sourceUrl}
-                              </a>
-                            )}
-                            <div className="flex items-center justify-end gap-2 mt-2">
-                              <span className="text-[11px] text-muted-foreground/50">
-                                {new Date(project.createdAt).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                              </span>
-                              <button
-                                className="p-1.5 rounded-md text-muted-foreground/50 hover:text-destructive transition"
-                                onClick={(e) => { e.stopPropagation(); handleDeleteProject(project); }}
-                                disabled={deletingId === project.id || project.optimisticStatus === 'creating'}
-                                title="删除项目"
-                              >
-                                {deletingId === project.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="text-sm font-medium truncate flex-1 min-w-0">{project.name}</div>
+                        <Badge
+                          variant={getProjectBadgeVariant(project)}
+                          className={`shrink-0 ${project.status === 'completed' ? 'bg-emerald-500/20 text-emerald-600 border-emerald-500/30' : ''}`}
+                        >
+                          {getProjectStatusLabel(project)}
+                        </Badge>
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">{project.sourceType} · {formatSize(project.fileSize)}</div>
+                      {project.sourceUrl && (
+                        <a
+                          href={project.sourceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-primary/70 hover:text-primary hover:underline truncate block mt-1"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {project.sourceUrl}
+                        </a>
+                      )}
+                      <div className="flex items-center justify-end gap-2 mt-2">
+                        <span className="text-[11px] text-muted-foreground/50">
+                          {new Date(project.createdAt).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                        <button
+                          className="p-1.5 rounded-md text-muted-foreground/50 hover:text-destructive transition"
+                          onClick={(e) => { e.stopPropagation(); handleDeleteProject(project); }}
+                          disabled={deletingId === project.id || project.optimisticStatus === 'creating'}
+                          title="删除项目"
+                        >
+                          {deletingId === project.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                   {projectPagination.totalPages > 1 && (
                     <div className="flex items-center justify-between gap-2 pt-3">
                       <Button
