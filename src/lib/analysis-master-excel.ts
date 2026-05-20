@@ -96,14 +96,23 @@ export function buildAnalysisMasterExportRows(projects: AnalysisMasterExportProj
 
     return {
       // 基础信息
-      项目ID: project.id,
       项目名称: project.name,
-      来源类型: project.sourceType || '',
       URL: project.sourceUrl || '',
-      状态: project.status || '',
-      错误信息: project.error || '',
       创建时间: project.createdAt || '',
-      更新时间: project.updatedAt || '',
+
+      // 内容素材
+      画面提示词: cleanCellValue(raw.imagePrompt),
+      视频提示词: cleanCellValue(raw.videoPrompt),
+
+      // 口播
+      口播原文: cleanCellValue(raw.dialogue_vo_original),
+      口播中文: cleanCellValue(raw.dialogue_vo_zh),
+
+      // CTA
+      CTA钩子: cleanCellValue(raw.cta_a),
+      CTA痛点: cleanCellValue(raw.cta_b),
+      CTA卖点: cleanCellValue(raw.cta_c),
+      CTA转化: cleanCellValue(raw.cta_d),
 
       // 视频基础信息
       场景名称: cleanCellValue(raw.name),
@@ -143,16 +152,10 @@ export function buildAnalysisMasterExportRows(projects: AnalysisMasterExportProj
       环境音: cleanCellValue(raw.ambient_sound),
 
       // 内容素材
-      画面提示词: cleanCellValue(raw.imagePrompt),
-      视频提示词: cleanCellValue(raw.videoPrompt),
       动作调度: cleanCellValue(raw.action_scheduling),
       产品描述: cleanCellValue(raw.product_desc),
       必须展示: cleanCellValue(raw.must_show),
       屏幕元素: cleanCellValue(raw.on_screen_text_graphics),
-
-      // 口播
-      口播原文: cleanCellValue(raw.dialogue_vo_original),
-      口播中文: cleanCellValue(raw.dialogue_vo_zh),
       语言风格: cleanCellValue(raw.language_style),
       强调备注: cleanCellValue(raw.emphasis_notes),
 
@@ -165,16 +168,6 @@ export function buildAnalysisMasterExportRows(projects: AnalysisMasterExportProj
       素材需求: cleanCellValue(raw.assets_needed),
       句子映射: cleanCellValue(raw.sentence_mapping),
       映射备注: cleanCellValue(raw.mapping_notes),
-
-      // 合规
-      合规风险: cleanCellValue(raw.forbidden_claims_risk),
-      强制披露: cleanCellValue(raw.must_disclose),
-
-      // CTA
-      CTA钩子: cleanCellValue(raw.cta_a),
-      CTA痛点: cleanCellValue(raw.cta_b),
-      CTA卖点: cleanCellValue(raw.cta_c),
-      CTA转化: cleanCellValue(raw.cta_d),
     };
   });
 }
@@ -185,20 +178,23 @@ export function createAnalysisMasterWorkbook(rows: AnalysisMasterExportRow[]): B
 
   // 设置列宽
   worksheet['!cols'] = [
-    { wch: 40 }, // 项目ID
     { wch: 30 }, // 项目名称
-    { wch: 12 }, // 来源类型
     { wch: 60 }, // URL
-    { wch: 10 }, // 状态
-    { wch: 40 }, // 错误信息
     { wch: 20 }, // 创建时间
-    { wch: 20 }, // 更新时间
+    { wch: 80 }, // 画面提示词
+    { wch: 80 }, // 视频提示词
+    { wch: 60 }, // 口播原文
+    { wch: 60 }, // 口播中文
+    { wch: 40 }, // CTA钩子
+    { wch: 40 }, // CTA痛点
+    { wch: 40 }, // CTA卖点
+    { wch: 40 }, // CTA转化
     { wch: 40 }, // 场景名称
     { wch: 12 }, // 主要语言
     { wch: 8 },  // 画幅
     { wch: 20 }, // 视频类型
     { wch: 30 }, // 平台适配
-    { wch: 8 },  // 总时长秒
+    { wch: 10 }, // 总时长秒
     { wch: 20 }, // 整体调性
     { wch: 8 },  // 能量等级
     { wch: 15 }, // 说话风格
@@ -222,14 +218,10 @@ export function createAnalysisMasterWorkbook(rows: AnalysisMasterExportRow[]): B
     { wch: 20 }, // BGM描述
     { wch: 15 }, // 音效描述
     { wch: 15 }, // 环境音
-    { wch: 80 }, // 画面提示词
-    { wch: 80 }, // 视频提示词
     { wch: 60 }, // 动作调度
     { wch: 30 }, // 产品描述
     { wch: 40 }, // 必须展示
     { wch: 20 }, // 屏幕元素
-    { wch: 60 }, // 口播原文
-    { wch: 60 }, // 口播中文
     { wch: 15 }, // 语言风格
     { wch: 20 }, // 强调备注
     { wch: 20 }, // 转场
@@ -240,12 +232,6 @@ export function createAnalysisMasterWorkbook(rows: AnalysisMasterExportRow[]): B
     { wch: 30 }, // 素材需求
     { wch: 15 }, // 句子映射
     { wch: 20 }, // 映射备注
-    { wch: 20 }, // 合规风险
-    { wch: 30 }, // 强制披露
-    { wch: 40 }, // CTA钩子
-    { wch: 40 }, // CTA痛点
-    { wch: 40 }, // CTA卖点
-    { wch: 40 }, // CTA转化
   ];
 
   XLSX.utils.book_append_sheet(workbook, worksheet, '分析大师');
