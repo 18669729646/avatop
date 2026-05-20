@@ -229,9 +229,5 @@ export function createAnalysisMasterWorkbook(rows: AnalysisMasterExportRow[]): B
   ];
 
   XLSX.utils.book_append_sheet(workbook, worksheet, '分析大师');
-  const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-
-  // 添加 UTF-8 BOM 解决中文乱码
-  const bom = Buffer.from([0xef, 0xbb, 0xbf]);
-  return Buffer.concat([bom, buffer]);
+  return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 }
