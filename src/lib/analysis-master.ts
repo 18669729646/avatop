@@ -18,6 +18,35 @@ export interface AnalysisScene {
   shotType?: string;
   cameraMovement?: string;
   sellingPoint?: string;
+  dialogueVoOriginal?: string;
+  dialogueVoZh?: string;
+  ctaA?: string;
+  ctaB?: string;
+  ctaC?: string;
+  ctaD?: string;
+  actionScheduling?: string;
+  productDesc?: string;
+  mustShow?: string;
+  onScreenTextGraphics?: string;
+  cameraShotSize?: string;
+  cameraAngle?: string;
+  compositionNotes?: string;
+  lightingAtmosphere?: string;
+  colorGrading?: string;
+  languageStyle?: string;
+  emphasisNotes?: string;
+  audioBgm?: string;
+  audioSfx?: string;
+  ambientSound?: string;
+  editingTransition?: string;
+  pacingNotes?: string;
+  filmingConstraints?: string;
+  constraintsCompliance?: string;
+  reverseConstraints?: string;
+  assetsNeeded?: string;
+  sentenceMapping?: string;
+  mappingNotes?: string;
+  preAnalysis?: unknown;
 }
 
 export interface AnalysisMasterResult {
@@ -44,6 +73,18 @@ export interface AnalysisPromptContext {
   videoDuration?: number | string;
 }
 
+const ANALYSIS_MASTER_EXTENDED_FIELDS_PROMPT = `
+
+补充输出要求：每个 scenes[] 分镜对象必须尽量包含以下字段；无法识别时返回空字符串或空对象，不要省略字段：
+dialogue_vo_original, dialogue_vo_zh, cta_a, cta_b, cta_c, cta_d,
+action_scheduling, product_desc, must_show, on_screen_text_graphics,
+camera_shot_size, camera_angle, camera_movement, composition_notes,
+lighting_atmosphere, color_grading, language_style, emphasis_notes,
+audio_bgm, audio_sfx, ambient_sound, editing_transition, pacing_notes,
+filming_constraints, constraints_compliance, reverse_constraints,
+assets_needed, sentence_mapping, mapping_notes, pre_analysis.
+`;
+
 function extractJsonObject(text: string): Record<string, unknown> {
   const cleaned = text.replace(/```json|```/g, '').trim();
   const match = cleaned.match(/\{[\s\S]*\}/);
@@ -67,6 +108,14 @@ function normalizeStringArray(value: unknown): string[] {
   return value.map(item => String(item || '').trim()).filter(Boolean);
 }
 
+function stringField(source: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = source[key];
+    if (value !== undefined && value !== null) return String(value);
+  }
+  return '';
+}
+
 export function normalizeAnalysisResult(raw: Record<string, unknown>): AnalysisMasterResult {
   const rawScenes = Array.isArray(raw.scenes) ? raw.scenes as Array<Record<string, unknown>> : [];
   const scenes = rawScenes.map((scene, index) => {
@@ -88,6 +137,35 @@ export function normalizeAnalysisResult(raw: Record<string, unknown>): AnalysisM
       shotType: String(scene.shotType || scene.shot_type || ''),
       cameraMovement: String(scene.cameraMovement || scene.camera_movement || ''),
       sellingPoint: String(scene.sellingPoint || scene.selling_point || ''),
+      dialogueVoOriginal: stringField(scene, 'dialogueVoOriginal', 'dialogue_vo_original'),
+      dialogueVoZh: stringField(scene, 'dialogueVoZh', 'dialogue_vo_zh'),
+      ctaA: stringField(scene, 'ctaA', 'cta_a'),
+      ctaB: stringField(scene, 'ctaB', 'cta_b'),
+      ctaC: stringField(scene, 'ctaC', 'cta_c'),
+      ctaD: stringField(scene, 'ctaD', 'cta_d'),
+      actionScheduling: stringField(scene, 'actionScheduling', 'action_scheduling'),
+      productDesc: stringField(scene, 'productDesc', 'product_desc'),
+      mustShow: stringField(scene, 'mustShow', 'must_show'),
+      onScreenTextGraphics: stringField(scene, 'onScreenTextGraphics', 'on_screen_text_graphics'),
+      cameraShotSize: stringField(scene, 'cameraShotSize', 'camera_shot_size'),
+      cameraAngle: stringField(scene, 'cameraAngle', 'camera_angle'),
+      compositionNotes: stringField(scene, 'compositionNotes', 'composition_notes'),
+      lightingAtmosphere: stringField(scene, 'lightingAtmosphere', 'lighting_atmosphere'),
+      colorGrading: stringField(scene, 'colorGrading', 'color_grading'),
+      languageStyle: stringField(scene, 'languageStyle', 'language_style'),
+      emphasisNotes: stringField(scene, 'emphasisNotes', 'emphasis_notes'),
+      audioBgm: stringField(scene, 'audioBgm', 'audio_bgm'),
+      audioSfx: stringField(scene, 'audioSfx', 'audio_sfx'),
+      ambientSound: stringField(scene, 'ambientSound', 'ambient_sound'),
+      editingTransition: stringField(scene, 'editingTransition', 'editing_transition'),
+      pacingNotes: stringField(scene, 'pacingNotes', 'pacing_notes'),
+      filmingConstraints: stringField(scene, 'filmingConstraints', 'filming_constraints'),
+      constraintsCompliance: stringField(scene, 'constraintsCompliance', 'constraints_compliance'),
+      reverseConstraints: stringField(scene, 'reverseConstraints', 'reverse_constraints'),
+      assetsNeeded: stringField(scene, 'assetsNeeded', 'assets_needed'),
+      sentenceMapping: stringField(scene, 'sentenceMapping', 'sentence_mapping'),
+      mappingNotes: stringField(scene, 'mappingNotes', 'mapping_notes'),
+      preAnalysis: scene.preAnalysis || scene.pre_analysis,
     };
   });
 
@@ -127,12 +205,13 @@ export async function getAnalysisMasterPrompt(context: AnalysisPromptContext): P
     template = PROMPT_TYPE_CONFIGS.analysis_master.getDefaultPrompt();
   }
 
-  return replaceVariables(template, {
+  const prompt = replaceVariables(template, {
     videoUrl: context.videoUrl || '',
     projectName: context.projectName || '',
     sourceType: context.sourceType || '',
     videoDuration: context.videoDuration || '未知',
   });
+  return `${prompt}${ANALYSIS_MASTER_EXTENDED_FIELDS_PROMPT}`;
 }
 
 async function callGeminiWithParts(

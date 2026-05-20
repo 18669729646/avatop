@@ -733,6 +733,7 @@ export const analysisMasterProjects = pgTable(
     fileSize: integer("file_size"),
     status: varchar("status", { length: 32 }).default('draft'),
     result: jsonb("result").$type<Record<string, unknown>>(),
+    importMetadata: jsonb("import_metadata").$type<Record<string, string>>().default({}),
     error: text("error"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),

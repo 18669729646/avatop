@@ -70,6 +70,7 @@ import {
   VideoTaskResult,
   ScriptTaskResult,
   AnalysisTaskResult,
+  AnalysisBatchImportTaskResult,
   processQueue,
 } from '@/lib/queue';
 import { useTaskEvents, TaskEventData, ConnectionStatus } from '@/hooks/use-task-events';
@@ -92,6 +93,7 @@ function getTaskTypeName(type: QueueTask['type']): string {
   if (type === 'video') return '视频生成';
   if (type === 'script') return '脚本生成';
   if (type === 'analysis') return '分析大师';
+  if (type === 'analysis_batch_import') return '批量导入';
   return type;
 }
 
@@ -1088,6 +1090,36 @@ export default function QueuePage() {
             
             // 图片和视频任务处理
             // 获取所有结果（包括最新的 result 和历史 results）
+            if (selectedTask.type === 'analysis_batch_import') {
+              const result = selectedTask.result as AnalysisBatchImportTaskResult | undefined;
+              return (
+                <div className="flex flex-col h-full">
+                  <div className="flex-1 flex items-center justify-center p-4">
+                    <div className="text-center space-y-2">
+                      <FileText className="w-8 h-8 mx-auto text-purple-500" />
+                      <div className="font-medium">批量导入任务</div>
+                      <div className="text-sm text-muted-foreground">
+                        {selectedTask.status === 'success'
+                          ? `已导入 ${result?.createdRows ?? 0} 条，失败 ${result?.failedRows ?? 0} 条`
+                          : selectedTask.error || '任务正在后台处理中'}
+                      </div>
+                      {result?.batchId && (
+                        <div className="text-xs text-muted-foreground">批次 ID：{result.batchId}</div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-center gap-2 p-3 border-t bg-muted/30">
+                    <Button variant="outline" size="sm" onClick={() => setShowTaskDetail(false)}>
+                      关闭
+                    </Button>
+                    <Button size="sm" onClick={() => router.push('/analysis-master')}>
+                      前往分析大师
+                    </Button>
+                  </div>
+                </div>
+              );
+            }
+
             if (selectedTask.type === 'analysis') {
               const result = selectedTask.result as AnalysisTaskResult | undefined;
               return (
@@ -1553,6 +1585,26 @@ export default function QueuePage() {
                 </div>
               </div>
               
+              {taskInfoDetail.type === 'analysis_batch_import' && taskInfoDetail.result && (
+                <div>
+                  <h4 className="text-sm font-medium mb-2">失败明细</h4>
+                  <div className="space-y-2 max-h-56 overflow-auto pr-1">
+                    {((taskInfoDetail.result as AnalysisBatchImportTaskResult).failedItems || []).length > 0 ? (
+                      (taskInfoDetail.result as AnalysisBatchImportTaskResult).failedItems!.map((item, idx) => (
+                        <div key={`${item.sourceUrl}-${idx}`} className="rounded-lg border bg-muted/30 p-3 text-xs space-y-1">
+                          <div className="font-medium break-all">{item.sourceUrl}</div>
+                          <div className="text-destructive break-all">{item.error}</div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                        当前没有失败明细
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* 错误信息 */}
               {taskInfoDetail.status === 'failed' && taskInfoDetail.error && (
                 <div>

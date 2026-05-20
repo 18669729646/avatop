@@ -9,7 +9,7 @@ type TaskEventListener = (data: TaskEventData) => void;
 // 任务事件数据
 export interface TaskEventData {
   taskId: string;
-  type: 'image' | 'video' | 'script' | 'analysis';
+  type: 'image' | 'video' | 'script' | 'analysis' | 'analysis_batch_import';
   status: 'pending' | 'running' | 'retrying' | 'success' | 'failed' | 'started' | 'progress';
   projectId?: string; // 所属短片项目ID（短片相关任务会有此字段）
   startedAt?: number; // 任务开始执行时间（状态为 running 时提供）
@@ -19,6 +19,15 @@ export interface TaskEventData {
     videoUrl?: string;
     thumbnailUrl?: string;
     fileSize?: number;
+    batchId?: string;
+    sourceFileName?: string;
+    totalRows?: number;
+    createdRows?: number;
+    failedRows?: number;
+    failedItems?: Array<{
+      sourceUrl: string;
+      error: string;
+    }>;
     taskCount?: number;
     scenesCount?: number;
     sceneId?: string;

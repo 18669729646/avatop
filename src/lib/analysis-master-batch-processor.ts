@@ -1,0 +1,205 @@
+import { SupabaseClient } from '@supabase/supabase-js';
+import { broadcastTaskUpdate } from '@/lib/task-events';
+import { logInfo, logTaskError } from '@/lib/logger';
+import { createAnalysisProjectFromLink } from '@/lib/analysis-master-projects';
+import { enqueueAnalysisTaskForProject, triggerBackgroundProcessing } from '@/lib/analysis-master-queue';
+import type { AnalysisBatchImportTaskParams, AnalysisBatchImportTaskResult } from '@/lib/queue';
+
+interface AnalysisBatchQueueTask {
+  id: string;
+  user_id?: string;
+  started_at?: string;
+  params: unknown;
+}
+
+interface AnalysisBatchProcessorDeps {
+  createAnalysisProjectFromLink?: typeof createAnalysisProjectFromLink;
+  enqueueAnalysisTaskForProject?: typeof enqueueAnalysisTaskForProject;
+  triggerBackgroundProcessing?: typeof triggerBackgroundProcessing;
+  broadcastTaskUpdate?: typeof broadcastTaskUpdate;
+  logInfo?: typeof logInfo;
+}
+
+function resolveBatchProjectName(metadata: Record<string, string>, index: number): string {
+  return (
+    metadata['项目名称']
+    || metadata['视频名称']
+    || metadata['标题']
+    || metadata['名称']
+    || metadata['内容']
+    || `批量导入项目 ${index + 1}`
+  );
+}
+
+export async function executeAnalysisBatchImportTask(
+  task: AnalysisBatchQueueTask,
+  supabase: SupabaseClient,
+  deps: AnalysisBatchProcessorDeps = {}
+): Promise<void> {
+  const createProject = deps.createAnalysisProjectFromLink || createAnalysisProjectFromLink;
+  const enqueueAnalysisTask = deps.enqueueAnalysisTaskForProject || enqueueAnalysisTaskForProject;
+  const triggerProcessing = deps.triggerBackgroundProcessing || triggerBackgroundProcessing;
+  const emitTaskUpdate = deps.broadcastTaskUpdate || broadcastTaskUpdate;
+  const emitLogInfo = deps.logInfo || logInfo;
+  const params = task.params as AnalysisBatchImportTaskParams;
+
+  if (!task.user_id) {
+    throw new Error('批量导入任务缺少用户ID');
+  }
+
+  if (!Array.isArray(params.imports) || params.imports.length === 0) {
+    throw new Error('批量导入任务缺少导入数据');
+  }
+
+  const startedAt = task.started_at || new Date().toISOString();
+  let createdRows = 0;
+  let failedRows = 0;
+  const failedItems: Array<{ sourceUrl: string; error: string }> = [];
+
+  const updateTaskQueueRow = async (
+    updates: Record<string, unknown>,
+    operation: string
+  ): Promise<boolean> => {
+    const maxRetries = 3;
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const { error } = await supabase
+        .from('task_queue')
+        .update(updates)
+        .eq('id', task.id);
+
+      if (!error) {
+        return true;
+      }
+
+      lastError = error;
+      if (attempt < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, 200 * attempt));
+      }
+    }
+
+    logTaskError(task.id, operation, lastError, {
+      batchId: params.batchId,
+      totalRows: params.totalRows,
+      createdRows,
+      failedRows,
+    }, task.user_id);
+
+    return false;
+  };
+
+  const persistProgress = async (): Promise<void> => {
+    const partialResult: AnalysisBatchImportTaskResult = {
+      batchId: params.batchId,
+      sourceFileName: params.sourceFileName,
+      totalRows: params.totalRows,
+      createdRows,
+      failedRows,
+      failedItems: failedItems.slice(0, 20),
+    };
+
+    const updated = await updateTaskQueueRow({
+      status: 'running',
+      result: partialResult,
+      error: null,
+      started_at: startedAt,
+    }, 'batch import progress writeback');
+
+    if (!updated) {
+      return;
+    }
+
+    emitTaskUpdate({
+      taskId: task.id,
+      type: 'analysis_batch_import',
+      status: 'progress',
+      progress: Math.min(99, Math.round(((createdRows + failedRows) / params.totalRows) * 100)),
+      result: partialResult,
+    });
+  };
+
+  for (const [index, item] of params.imports.entries()) {
+    let projectId: string | null = null;
+
+    try {
+      const project = await createProject({
+        userId: task.user_id,
+        sourceUrl: item.sourceUrl,
+        name: resolveBatchProjectName(item.metadata, index),
+        importMetadata: item.metadata,
+      });
+      projectId = String(project.id);
+
+      await enqueueAnalysisTask({
+        projectId,
+        userId: task.user_id,
+        triggerProcessing: false,
+      });
+
+      createdRows += 1;
+    } catch (error) {
+      failedRows += 1;
+      const message = error instanceof Error ? error.message : '批量导入失败';
+      failedItems.push({ sourceUrl: item.sourceUrl, error: message });
+
+      if (projectId) {
+        await supabase
+          .from('analysis_master_projects')
+          .update({
+            status: 'failed',
+            error: message,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', projectId)
+          .eq('user_id', task.user_id);
+      }
+    }
+
+    await persistProgress();
+  }
+
+  const result = {
+    batchId: params.batchId,
+    sourceFileName: params.sourceFileName,
+    totalRows: params.totalRows,
+    createdRows,
+    failedRows,
+    failedItems: failedItems.slice(0, 20),
+  };
+
+  const finalWriteSucceeded = await updateTaskQueueRow({
+    status: 'success',
+    result,
+    error: null,
+    started_at: startedAt,
+    completed_at: new Date().toISOString(),
+  }, 'batch import final writeback');
+
+  emitTaskUpdate({
+    taskId: task.id,
+    type: 'analysis_batch_import',
+    status: 'success',
+    progress: 100,
+    result,
+  });
+
+  await triggerProcessing(null, task.user_id, null, params.totalRows);
+
+  if (!finalWriteSucceeded) {
+    logTaskError(task.id, 'batch import final status sync', new Error('task_queue final update failed after retries'), {
+      batchId: params.batchId,
+      totalRows: params.totalRows,
+      createdRows,
+      failedRows,
+    }, task.user_id);
+  }
+
+  emitLogInfo('task', '批量导入完成', {
+    taskId: task.id,
+    batchId: params.batchId,
+    totalRows: params.totalRows,
+    createdRows,
+    failedRows,
+  }, task.user_id);
+}

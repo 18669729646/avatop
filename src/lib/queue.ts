@@ -6,7 +6,7 @@ import {
 } from './cache';
 import { getAuthToken } from './api';
 
-export type TaskType = 'image' | 'video' | 'script' | 'analysis';
+export type TaskType = 'image' | 'video' | 'script' | 'analysis' | 'analysis_batch_import';
 export type TaskStatus = 'pending' | 'running' | 'retrying' | 'success' | 'failed' | 'started' | 'progress';
 
 // 图片生成任务参数
@@ -63,6 +63,16 @@ export interface AnalysisTaskParams {
   videoUrl?: string;
 }
 
+export interface AnalysisBatchImportTaskParams {
+  batchId: string;
+  sourceFileName: string;
+  totalRows: number;
+  imports: Array<{
+    sourceUrl: string;
+    metadata: Record<string, string>;
+  }>;
+}
+
 // 任务结果
 export interface ImageTaskResult {
   url: string;
@@ -92,14 +102,26 @@ export interface AnalysisTaskResult {
   scenesCount?: number;
 }
 
+export interface AnalysisBatchImportTaskResult {
+  batchId: string;
+  sourceFileName?: string;
+  totalRows: number;
+  createdRows: number;
+  failedRows: number;
+  failedItems?: Array<{
+    sourceUrl: string;
+    error: string;
+  }>;
+}
+
 // 任务项
 export interface QueueTask {
   id: string;
   type: TaskType;
   status: TaskStatus;
-  params: ImageTaskParams | VideoTaskParams | ScriptTaskParams | AnalysisTaskParams;
-  result?: ImageTaskResult | VideoTaskResult | ScriptTaskResult | AnalysisTaskResult;
-  results?: (ImageTaskResult | VideoTaskResult | ScriptTaskResult | AnalysisTaskResult)[]; // 存储所有生成结果（包括重试产生的）
+  params: ImageTaskParams | VideoTaskParams | ScriptTaskParams | AnalysisTaskParams | AnalysisBatchImportTaskParams;
+  result?: ImageTaskResult | VideoTaskResult | ScriptTaskResult | AnalysisTaskResult | AnalysisBatchImportTaskResult;
+  results?: (ImageTaskResult | VideoTaskResult | ScriptTaskResult | AnalysisTaskResult | AnalysisBatchImportTaskResult)[]; // 存储所有生成结果（包括重试产生的）
   error?: string; // 错误信息（包含重试状态）
   lastError?: string; // 最近一次 API 返回的原始错误信息
   projectId?: string; // 所属短片项目ID
@@ -230,9 +252,9 @@ export async function getTaskQueue(viewMode: 'all' | 'mine' = 'mine'): Promise<{
       id: task.id as string,
       type: task.type as TaskType,
       status: task.status as TaskStatus,
-      params: task.params as ImageTaskParams | VideoTaskParams | ScriptTaskParams | AnalysisTaskParams,
-      result: task.result as ImageTaskResult | VideoTaskResult | ScriptTaskResult | AnalysisTaskResult | undefined,
-      results: task.results as (ImageTaskResult | VideoTaskResult | ScriptTaskResult | AnalysisTaskResult)[] | undefined,
+      params: task.params as ImageTaskParams | VideoTaskParams | ScriptTaskParams | AnalysisTaskParams | AnalysisBatchImportTaskParams,
+      result: task.result as ImageTaskResult | VideoTaskResult | ScriptTaskResult | AnalysisTaskResult | AnalysisBatchImportTaskResult | undefined,
+      results: task.results as (ImageTaskResult | VideoTaskResult | ScriptTaskResult | AnalysisTaskResult | AnalysisBatchImportTaskResult)[] | undefined,
       error: task.error as string | undefined,
       lastError: task.last_error as string | undefined, // API 返回的原始错误
       projectId: task.project_id as string | undefined, // 短片项目ID
@@ -287,7 +309,7 @@ export async function getQueueStats(viewMode: 'all' | 'mine' = 'mine'): Promise<
 // 添加任务到队列
 export async function addTaskToQueue(
   type: TaskType,
-  params: ImageTaskParams | VideoTaskParams | ScriptTaskParams | AnalysisTaskParams,
+  params: ImageTaskParams | VideoTaskParams | ScriptTaskParams | AnalysisTaskParams | AnalysisBatchImportTaskParams,
   projectId?: string // 所属短片项目ID
 ): Promise<{ task: QueueTask | null; error?: string }> {
   const config = await getQueueConfig();

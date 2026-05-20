@@ -14,6 +14,7 @@ import {
   ANALYSIS_MASTER_ACTION_TYPE,
   analyzeVideoBufferWithGemini,
 } from '@/lib/analysis-master';
+import { executeAnalysisBatchImportTask } from '@/lib/analysis-master-batch-processor';
 
 // 任务执行状态（内存中跟踪正在处理的任务）
 const processingTasks = new Set<string>();
@@ -217,12 +218,22 @@ interface AnalysisTaskParams {
   creditsRequired?: number;
 }
 
+interface AnalysisBatchImportTaskParams {
+  batchId: string;
+  sourceFileName: string;
+  totalRows: number;
+  imports: Array<{
+    sourceUrl: string;
+    metadata: Record<string, string>;
+  }>;
+}
+
 // 任务项（数据库格式）
 interface QueueTask {
   id: string;
-  type: 'image' | 'video' | 'script' | 'analysis';
+  type: 'image' | 'video' | 'script' | 'analysis' | 'analysis_batch_import';
   status: 'pending' | 'running' | 'retrying' | 'success' | 'failed';
-  params: ImageTaskParams | VideoTaskParams | ScriptTaskParams | AnalysisTaskParams;
+  params: ImageTaskParams | VideoTaskParams | ScriptTaskParams | AnalysisTaskParams | AnalysisBatchImportTaskParams;
   result?: { 
     url?: string; 
     taskId?: string; 
@@ -399,6 +410,8 @@ async function processTask(task: QueueTask): Promise<void> {
       await executeScriptTask(task, supabase);
     } else if (task.type === 'analysis') {
       await executeAnalysisTask(task, supabase);
+    } else if (task.type === 'analysis_batch_import') {
+      await executeAnalysisBatchImportTask(task, supabase);
     }
 
   } catch (error) {
