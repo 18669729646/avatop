@@ -76,6 +76,7 @@ export async function createAnalysisProjectFromLink(
     sourceUrl: string;
     name?: string;
     importMetadata?: Record<string, string>;
+    clientRequestId?: string;
   },
   deps: AnalysisMasterProjectDeps = {}
 ) {
@@ -104,6 +105,13 @@ export async function createAnalysisProjectFromLink(
   const storageCheck = await storageQuota(params.userId, downloaded.buffer.length);
   if (!storageCheck.allowed) {
     throw new AnalysisMasterProjectError(storageCheck.error || '存储空间不足', 507);
+  }
+
+  const importMetadata = {
+    ...(params.importMetadata || {}),
+  };
+  if (params.clientRequestId) {
+    importMetadata.clientRequestId = params.clientRequestId;
   }
 
   let videoKey: string | null = null;
@@ -141,7 +149,7 @@ export async function createAnalysisProjectFromLink(
         audio_url: audioResult?.audioUrl || null,
         audio_duration: audioResult?.audioDuration || null,
         audio_file_size: audioResult?.audioFileSize || 0,
-        import_metadata: params.importMetadata || {},
+        import_metadata: importMetadata,
         status: 'draft',
         updated_at: new Date().toISOString(),
       })

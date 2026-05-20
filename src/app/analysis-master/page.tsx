@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppLayout } from '@/components/app-layout';
 import { Button } from '@/components/ui/button';
@@ -17,6 +17,13 @@ import { useTaskEvents } from '@/hooks/use-task-events';
 import { Download, FileSpreadsheet, Loader2, Music, Play, RefreshCw, Sparkles, Upload, Copy, Trash2 } from 'lucide-react';
 import { copyToClipboard } from '@/lib/prompt-templates';
 import { useTaskQueue } from '@/lib/swr';
+import {
+  createAnalysisMasterDraftProject,
+  loadAnalysisMasterDraftProjects,
+  mergeAnalysisMasterProjects,
+  saveAnalysisMasterDraftProjects,
+  type AnalysisMasterDraftProject,
+} from '@/lib/analysis-master-drafts';
 
 const ANALYSIS_MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 
@@ -103,6 +110,9 @@ interface AnalysisProject {
   result?: AnalysisResult | null;
   error?: string | null;
   importMetadata?: Record<string, string>;
+  clientRequestId?: string;
+  optimisticStatus?: 'creating' | 'failed';
+  optimisticError?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -140,6 +150,13 @@ function formatSize(size?: number) {
   return `${(size / 1024 / 1024).toFixed(1)}MB`;
 }
 
+function createClientRequestId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `amreq-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 const statusLabels: Record<string, string> = {
   downloading: '下载中',
   draft: '待分析',
@@ -147,6 +164,29 @@ const statusLabels: Record<string, string> = {
   failed: '分析失败',
   completed: '已完成',
 };
+
+function getProjectStatusLabel(project: AnalysisProject): string {
+  if (project.optimisticStatus === 'creating') {
+    return '创建中';
+  }
+  if (project.optimisticStatus === 'failed') {
+    return '创建失败';
+  }
+  return statusLabels[project.status] || project.status;
+}
+
+function getProjectBadgeVariant(project: AnalysisProject): 'default' | 'destructive' | 'secondary' {
+  if (project.optimisticStatus === 'failed' || project.status === 'failed') {
+    return 'destructive';
+  }
+  if (project.optimisticStatus === 'creating') {
+    return 'secondary';
+  }
+  if (project.status === 'completed') {
+    return 'default';
+  }
+  return 'secondary';
+}
 
 const batchStatusLabels: Record<string, string> = {
   queued: '已入队',
@@ -197,7 +237,8 @@ export default function AnalysisMasterPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const { tasks: queueTasks } = useTaskQueue('mine', user?.id);
-  const [projects, setProjects] = useState<AnalysisProject[]>([]);
+  const [serverProjects, setServerProjects] = useState<AnalysisProject[]>([]);
+  const [draftProjects, setDraftProjects] = useState<AnalysisMasterDraftProject[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
   const [previewData, setPreviewData] = useState<Record<string, unknown> | null>(null);
   const [previewProjectId, setPreviewProjectId] = useState<string>('');
@@ -222,7 +263,14 @@ export default function AnalysisMasterPage() {
     totalPages: 0,
   });
 
+  const projects = useMemo(
+    () => mergeAnalysisMasterProjects(serverProjects, draftProjects) as AnalysisProject[],
+    [draftProjects, serverProjects]
+  );
+
   const selectedProject = projects.find(project => project.id === selectedId) || projects[0];
+  const selectedProjectIsOptimistic = Boolean(selectedProject?.optimisticStatus);
+  const displayedProjectCount = projectPagination.total + draftProjects.length;
   const batchTask = batchSummary ? queueTasks.find(task => task.id === batchSummary.taskId) || null : null;
   const batchTaskResult = batchTask?.result as BatchImportTaskResult | undefined;
   const batchTotal = batchTaskResult?.totalRows ?? batchSummary?.total ?? 0;
@@ -243,7 +291,7 @@ export default function AnalysisMasterPage() {
       total: list.length,
       totalPages: list.length > 0 ? 1 : 0,
     }) as ProjectPagination;
-    setProjects(list);
+    setServerProjects(list);
     setProjectPagination(pagination);
     // 仅在首次加载时自动选中第一个项目，避免手动选择触发重新请求
     if (isInitialLoadRef.current && list.length > 0 && !selectedId) {
@@ -290,6 +338,30 @@ export default function AnalysisMasterPage() {
     } catch {}
   }, [batchSummary]);
 
+  useEffect(() => {
+    if (!user?.id) {
+      setDraftProjects([]);
+      return;
+    }
+
+    try {
+      const drafts = loadAnalysisMasterDraftProjects(window.localStorage, user.id);
+      setDraftProjects(drafts);
+    } catch {
+      setDraftProjects([]);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      return;
+    }
+
+    try {
+      saveAnalysisMasterDraftProjects(window.localStorage, user.id, draftProjects);
+    } catch {}
+  }, [draftProjects, user?.id]);
+
   // SSE 订阅：分析任务完成/失败时立即更新状态
   // 轮询仅作 SSE 断线兜底，降低频率避免页面抖动
   useTaskEvents((data) => {
@@ -298,7 +370,7 @@ export default function AnalysisMasterPage() {
     if (!projectId) return;
     if (data.status === 'success') {
       const r = data.result;
-      setProjects(prev => prev.map(p =>
+      setServerProjects(prev => prev.map(p =>
         p.id === projectId
           ? {
               ...p,
@@ -327,7 +399,7 @@ export default function AnalysisMasterPage() {
       ));
       setAnalyzingId(prev => prev === projectId ? '' : prev);
     } else if (data.status === 'failed') {
-      setProjects(prev => prev.map(p =>
+      setServerProjects(prev => prev.map(p =>
         p.id === projectId
           ? { ...p, status: 'failed', error: data.error }
           : p
@@ -345,9 +417,22 @@ export default function AnalysisMasterPage() {
       return;
     }
 
+    const clientRequestId = createClientRequestId();
+    const optimisticProject = createAnalysisMasterDraftProject({
+      clientRequestId,
+      name: projectName.trim() || '链接分析项目',
+      sourceUrl: url,
+    });
+
     console.log('[从链接导入] 开始, url=', url);
     setLoading(true);
     setError('');
+    setDraftProjects(prev => [
+      optimisticProject,
+      ...prev.filter(item => item.clientRequestId !== clientRequestId),
+    ]);
+    setSelectedId(clientRequestId);
+    setProjectPagination(prev => ({ ...prev, page: 1 }));
     try {
       const response = await authFetch('/api/analysis-master/projects', {
         method: 'POST',
@@ -355,6 +440,7 @@ export default function AnalysisMasterPage() {
         body: JSON.stringify({
           sourceUrl: url,
           name: projectName.trim() || '链接分析项目',
+          clientRequestId,
         }),
       });
       console.log('[从链接导入] 响应状态:', response.status);
@@ -363,13 +449,27 @@ export default function AnalysisMasterPage() {
       if (!response.ok) throw new Error(data.error || '创建失败');
       setSourceUrl('');
       setProjectName('');
-      await loadProjects(1);
+      const createdProject = data.data as AnalysisProject;
+      setDraftProjects(prev => prev.filter(item => item.clientRequestId !== clientRequestId));
+      setServerProjects(prev => [
+        createdProject,
+        ...prev.filter(item => item.id !== createdProject.id),
+      ]);
+      setProjectPagination(prev => ({ ...prev, total: prev.total + 1 }));
+      await loadProjects(1).catch(refreshErr => {
+        console.warn('[从链接导入] 列表刷新失败，但项目已创建:', refreshErr);
+      });
       setProjectPagination(prev => ({ ...prev, page: 1 }));
-      setSelectedId(data.data.id);
+      setSelectedId(createdProject.id);
       console.log('[从链接导入] 成功, projectId=', data.data.id);
     } catch (err) {
       const msg = err instanceof Error ? err.message : '创建失败';
       console.error('[从链接导入] 失败:', msg);
+      setDraftProjects(prev => prev.map(item =>
+        item.clientRequestId === clientRequestId
+          ? { ...item, optimisticStatus: 'failed', status: 'failed', error: msg, updatedAt: new Date().toISOString() }
+          : item
+      ));
       setError(msg);
     } finally {
       setLoading(false);
@@ -566,11 +666,24 @@ export default function AnalysisMasterPage() {
     }
   };
 
-  const handleDeleteProject = async (id: string) => {
+  const handleDeleteProject = async (project: AnalysisProject) => {
+    if (project.optimisticStatus === 'creating') {
+      return;
+    }
+
+    if (project.optimisticStatus === 'failed') {
+      if (!confirm('确定要删除这条创建失败的本地记录吗？删除后不可恢复。')) return;
+      setDraftProjects(prev => prev.filter(item => item.clientRequestId !== project.clientRequestId));
+      if (selectedId === project.id) {
+        setSelectedId(projects.find(item => item.id !== project.id)?.id || '');
+      }
+      return;
+    }
+
     if (!confirm('确定要删除该项目吗？删除后不可恢复。')) return;
-    setDeletingId(id);
+    setDeletingId(project.id);
     try {
-      const response = await authFetch(`/api/analysis-master/projects/${id}`, { method: 'DELETE' });
+      const response = await authFetch(`/api/analysis-master/projects/${project.id}`, { method: 'DELETE' });
       if (!response.ok) {
         const data = await response.json();
         throw new Error(data.error || '删除失败');
@@ -591,7 +704,7 @@ export default function AnalysisMasterPage() {
             <div className="flex items-center gap-3">
               <Sparkles className="w-5 h-5 text-purple-500" />
               <h1 className="text-lg sm:text-xl font-semibold">分析大师</h1>
-              <Badge variant="secondary">{projectPagination.total || projects.length} 个项目</Badge>
+              <Badge variant="secondary">{displayedProjectCount || projects.length} 个项目</Badge>
             </div>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={() => exportProjects()} disabled={exporting}>
@@ -728,7 +841,12 @@ export default function AnalysisMasterPage() {
                     <div key={project.id} className={`group relative rounded-lg border p-3 hover:bg-muted transition cursor-pointer ${selectedProject?.id === project.id ? 'border-primary bg-muted/60' : ''}`} onClick={() => setSelectedId(project.id)}>
                           <div className="flex items-start justify-between gap-2">
                             <div className="text-sm font-medium truncate flex-1 min-w-0">{project.name}</div>
-                            <Badge variant={project.status === 'completed' ? 'default' : project.status === 'downloading' ? 'default' : project.status === 'failed' ? 'destructive' : 'secondary'} className={`shrink-0 ${project.status === 'completed' ? 'bg-emerald-500/20 text-emerald-600 border-emerald-500/30' : ''}`}>{statusLabels[project.status] || project.status}</Badge>
+                            <Badge
+                              variant={getProjectBadgeVariant(project)}
+                              className={`shrink-0 ${project.status === 'completed' ? 'bg-emerald-500/20 text-emerald-600 border-emerald-500/30' : ''}`}
+                            >
+                              {getProjectStatusLabel(project)}
+                            </Badge>
                           </div>
                         <div className="text-xs text-muted-foreground mt-1">{project.sourceType} · {formatSize(project.fileSize)}</div>
                       {project.sourceUrl && (
@@ -742,18 +860,18 @@ export default function AnalysisMasterPage() {
                           {project.sourceUrl}
                         </a>
                       )}
-                      <div className="flex items-center justify-end gap-2 mt-2">
-                        <span className="text-[11px] text-muted-foreground/50">
-                          {new Date(project.createdAt).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                        <button
-                          className="p-1.5 rounded-md text-muted-foreground/50 hover:text-destructive transition"
-                          onClick={(e) => { e.stopPropagation(); handleDeleteProject(project.id); }}
-                          disabled={deletingId === project.id}
-                          title="删除项目"
-                        >
-                          {deletingId === project.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                        </button>
+                        <div className="flex items-center justify-end gap-2 mt-2">
+                          <span className="text-[11px] text-muted-foreground/50">
+                            {new Date(project.createdAt).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          <button
+                            className="p-1.5 rounded-md text-muted-foreground/50 hover:text-destructive transition"
+                            onClick={(e) => { e.stopPropagation(); handleDeleteProject(project); }}
+                            disabled={deletingId === project.id || project.optimisticStatus === 'creating'}
+                            title="删除项目"
+                          >
+                            {deletingId === project.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                          </button>
                       </div>
                     </div>
                   ))}
@@ -804,17 +922,17 @@ export default function AnalysisMasterPage() {
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                         <div>
                           <CardTitle>{selectedProject.name}</CardTitle>
-                          <div className="text-sm text-muted-foreground mt-1">{statusLabels[selectedProject.status] || selectedProject.status} · {formatSize(selectedProject.fileSize)}</div>
+                          <div className="text-sm text-muted-foreground mt-1">{getProjectStatusLabel(selectedProject)} · {formatSize(selectedProject.fileSize)}</div>
                         </div>
                         <div className="flex flex-col sm:flex-row gap-2">
-                          <Button variant="outline" onClick={() => exportProjects([selectedProject.id])} disabled={exporting || !selectedProject.result}>
+                          <Button variant="outline" onClick={() => exportProjects([selectedProject.id])} disabled={exporting || !selectedProject.result || selectedProjectIsOptimistic}>
                             {exporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
                             导出结果
                           </Button>
                           <Button
                             className={selectedProject.status === 'failed' ? 'bg-red-600 hover:bg-red-700' : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700'}
                             onClick={() => analyzeProject(selectedProject.id)}
-                            disabled={analyzingId === selectedProject.id || selectedProject.status === 'analyzing'}
+                            disabled={selectedProjectIsOptimistic || analyzingId === selectedProject.id || selectedProject.status === 'analyzing'}
                           >
                             {analyzingId === selectedProject.id || selectedProject.status === 'analyzing' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
                             {selectedProject.status === 'failed' ? '重新分析' : '开始分析'}
@@ -838,6 +956,16 @@ export default function AnalysisMasterPage() {
                         </div>
                       )}
                       {selectedProject.error && <div className="text-sm text-destructive bg-destructive/10 rounded-md p-3">{selectedProject.error}</div>}
+                      {selectedProject.optimisticStatus === 'creating' && (
+                        <div className="text-sm text-muted-foreground bg-muted/50 rounded-md p-3">
+                          正在创建项目，完成后会自动进入历史项目列表。
+                        </div>
+                      )}
+                      {selectedProject.optimisticStatus === 'failed' && (
+                        <div className="text-sm text-destructive bg-destructive/10 rounded-md p-3">
+                          创建失败，项目已保留在本地列表中，刷新后仍会显示。
+                        </div>
+                      )}
                       {selectedProject.result && (
                         <>
                           <div className="space-y-2">
