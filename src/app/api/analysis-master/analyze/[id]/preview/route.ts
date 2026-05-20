@@ -4,6 +4,7 @@ import { authenticateRequest } from '@/lib/auth-middleware';
 import { getAnalysisMasterPrompt } from '@/lib/analysis-master';
 import { s3Storage } from '@/lib/s3-client';
 import { URL_EXPIRE_TIME } from '@/lib/storage-types';
+import { getServerDefaultTextApi } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -88,10 +89,14 @@ export async function GET(
       videoDuration: project.video_duration || '未知',
     });
 
+    // 获取后台文本模型配置
+    const apiConfig = await getServerDefaultTextApi();
+    const model = apiConfig?.model || 'gemini-2.5-flash';
+
     // 构造与实际发送一致的请求体（video 以 base64 大小显示，便于预览）
     const base64Data = compressedBuffer.toString('base64');
     const requestBody = {
-      model: 'gemini-2.5-flash',
+      model,
       contents: [
         {
           parts: [
@@ -117,6 +122,7 @@ export async function GET(
       data: {
         projectId: project.id,
         projectName: project.name,
+        model,
         originalSize: videoBuffer.length,
         compressedSize: compressedBuffer.length,
         compressedBase64Size: base64Data.length,
