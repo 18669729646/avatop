@@ -179,12 +179,18 @@ export async function GET(request: NextRequest) {
       return unauthorizedResponse(auth.error, auth.status);
     }
 
+    const { searchParams } = new URL(request.url);
+    const page = Math.max(parseInt(searchParams.get('page') || '1', 10) || 1, 1);
+    const pageSize = Math.min(Math.max(parseInt(searchParams.get('pageSize') || '20', 10) || 20, 1), 50);
+    const offset = (page - 1) * pageSize;
+
     const client = getSupabaseClient();
-    const { data, error } = await client
+    const { data, error, count } = await client
       .from('analysis_master_projects')
-      .select('*')
+      .select('*', { count: 'exact' })
       .eq('user_id', auth.userId)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .range(offset, offset + pageSize - 1);
 
     if (error) {
       logApiError('analysis-master/projects', 'GET select', error, {}, auth.userId);
@@ -192,7 +198,16 @@ export async function GET(request: NextRequest) {
     }
 
     const projects = await Promise.all((data || []).map(mapProjectWithFreshUrl));
-    return NextResponse.json({ success: true, data: projects });
+    return NextResponse.json({
+      success: true,
+      data: projects,
+      pagination: {
+        page,
+        pageSize,
+        total: count || 0,
+        totalPages: Math.ceil((count || 0) / pageSize),
+      },
+    });
   } catch (error) {
     logApiError('analysis-master/projects', 'GET', error);
     return NextResponse.json({ error: '获取分析项目失败' }, { status: 500 });

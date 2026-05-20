@@ -22,6 +22,18 @@ export function createAnalysisProjectId(): string {
   return `am-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+interface AnalysisMasterProjectDeps {
+  downloadVideoFromUrl?: typeof downloadVideoFromUrl;
+  checkStorageQuota?: typeof checkStorageQuota;
+  uploadFile?: typeof s3Storage.uploadFile;
+  generatePresignedUrl?: typeof s3Storage.generatePresignedUrl;
+  deleteFile?: typeof s3Storage.deleteFile;
+  extractAudioFromBuffer?: typeof extractAudioFromBuffer;
+  getSupabaseClient?: typeof getSupabaseClient;
+  logApiError?: typeof logApiError;
+  logInfo?: typeof logInfo;
+}
+
 export function mapAnalysisMasterProject(row: Record<string, unknown>) {
   return {
     id: row.id,
@@ -58,42 +70,61 @@ export async function mapAnalysisMasterProjectWithFreshUrl(row: Record<string, u
   return mapped;
 }
 
-export async function createAnalysisProjectFromLink(params: {
-  userId: string;
-  sourceUrl: string;
-  name?: string;
-  importMetadata?: Record<string, string>;
-}) {
+export async function createAnalysisProjectFromLink(
+  params: {
+    userId: string;
+    sourceUrl: string;
+    name?: string;
+    importMetadata?: Record<string, string>;
+  },
+  deps: AnalysisMasterProjectDeps = {}
+) {
   const sourceUrl = params.sourceUrl.trim();
   if (!sourceUrl) {
     throw new AnalysisMasterProjectError('请提供视频链接', 400);
   }
 
+  const download = deps.downloadVideoFromUrl || downloadVideoFromUrl;
+  const storageQuota = deps.checkStorageQuota || checkStorageQuota;
+  const uploadFile = deps.uploadFile || ((input) => s3Storage.uploadFile(input));
+  const generatePresignedUrl = deps.generatePresignedUrl || ((input) => s3Storage.generatePresignedUrl(input));
+  const deleteFile = deps.deleteFile || ((key) => s3Storage.deleteFile(key));
+  const extractAudio = deps.extractAudioFromBuffer || extractAudioFromBuffer;
+  const getClient = deps.getSupabaseClient || getSupabaseClient;
+  const apiLogError = deps.logApiError || logApiError;
+  const infoLog = deps.logInfo || logInfo;
+
   const projectId = createAnalysisProjectId();
-  const downloaded = await downloadVideoFromUrl(sourceUrl, {
+  const downloaded = await download(sourceUrl, {
     projectId,
     provider: 'auto',
     maxBytes: ANALYSIS_MAX_VIDEO_BYTES,
   });
-  const storageCheck = await checkStorageQuota(params.userId, downloaded.buffer.length);
+
+  const storageCheck = await storageQuota(params.userId, downloaded.buffer.length);
   if (!storageCheck.allowed) {
     throw new AnalysisMasterProjectError(storageCheck.error || '存储空间不足', 507);
   }
 
   let videoKey: string | null = null;
+  let audioKey: string | null = null;
+
   try {
-    videoKey = await s3Storage.uploadFile({
+    videoKey = await uploadFile({
       fileContent: downloaded.buffer,
       fileName: `analysis-master/source/${params.userId}/${projectId}.mp4`,
       contentType: downloaded.contentType,
     });
-    const audioResult = await extractAudioFromBuffer(downloaded.buffer, params.userId, projectId);
-    const videoUrl = await s3Storage.generatePresignedUrl({
+
+    const audioResult = await extractAudio(downloaded.buffer, params.userId, projectId);
+    audioKey = audioResult?.audioKey || null;
+
+    const videoUrl = await generatePresignedUrl({
       key: videoKey,
       expireTime: URL_EXPIRE_TIME,
     });
 
-    const client = getSupabaseClient();
+    const client = getClient();
     const { data, error } = await client
       .from('analysis_master_projects')
       .insert({
@@ -106,7 +137,7 @@ export async function createAnalysisProjectFromLink(params: {
         video_url: videoUrl,
         video_duration: downloaded.duration || null,
         file_size: downloaded.buffer.length,
-        audio_key: audioResult?.audioKey || null,
+        audio_key: audioKey || null,
         audio_url: audioResult?.audioUrl || null,
         audio_duration: audioResult?.audioDuration || null,
         audio_file_size: audioResult?.audioFileSize || 0,
@@ -118,20 +149,23 @@ export async function createAnalysisProjectFromLink(params: {
       .single();
 
     if (error) {
-      logApiError('analysis-master/projects', 'createFromLink insert', error, { projectId }, params.userId);
+      apiLogError('analysis-master/projects', 'createFromLink insert', error, { projectId }, params.userId);
       throw new AnalysisMasterProjectError('创建分析项目失败', 500);
     }
 
-    logInfo('api', '创建分析大师链接项目', { projectId, provider: downloaded.provider }, params.userId);
+    infoLog('api', '创建分析大师链接项目', { projectId, provider: downloaded.provider }, params.userId);
     return mapAnalysisMasterProject(data);
   } catch (error) {
     if (videoKey) {
-      await s3Storage.deleteFile(videoKey).catch(() => false);
+      await deleteFile(videoKey).catch(() => false);
+    }
+    if (audioKey) {
+      await deleteFile(audioKey).catch(() => false);
     }
     if (error instanceof AnalysisMasterProjectError) {
       throw error;
     }
-    logApiError('analysis-master/projects', 'createFromLink', error, { projectId }, params.userId);
+    apiLogError('analysis-master/projects', 'createFromLink', error, { projectId }, params.userId);
     throw new AnalysisMasterProjectError('创建分析项目失败', 500);
   }
 }

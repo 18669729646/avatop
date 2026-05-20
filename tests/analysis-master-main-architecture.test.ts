@@ -1,22 +1,76 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
+import { describe, it } from 'node:test';
+import { createAnalysisProjectFromLink, AnalysisMasterProjectError } from '../src/lib/analysis-master-projects';
 
-const repoRoot = path.resolve(process.cwd());
+describe('analysis master project creation', () => {
+  it('cleans up uploaded video and audio objects when persistence fails', async () => {
+    const deletedKeys: string[] = [];
+    let insertCalls = 0;
 
-function readSource(relativePath: string): string {
-  return readFileSync(path.join(repoRoot, relativePath), 'utf8');
-}
+    await assert.rejects(
+      createAnalysisProjectFromLink(
+        {
+          userId: 'user-1',
+          sourceUrl: 'https://www.tiktok.com/@maker/video/123',
+          name: 'Cleanup test',
+        },
+        {
+          downloadVideoFromUrl: async () => ({
+            buffer: Buffer.from('video-bytes'),
+            contentType: 'video/mp4',
+            fileName: 'source.mp4',
+            title: 'Source title',
+            duration: 12,
+            provider: 'ssstik',
+          }),
+          checkStorageQuota: async () => ({
+            allowed: true,
+            usedBytes: 0,
+            quotaBytes: 1024 * 1024 * 1024,
+            usedMB: 0,
+            quotaMB: 1024,
+            percentUsed: 0,
+          }),
+          uploadFile: async () => 'video-key',
+          generatePresignedUrl: async ({ key }) => `https://cdn.example.com/${key}`,
+          deleteFile: async (key) => {
+            deletedKeys.push(key);
+            return true;
+          },
+          extractAudioFromBuffer: async () => ({
+            audioKey: 'audio-key',
+            audioUrl: 'https://cdn.example.com/audio-key',
+            audioDuration: 9,
+            audioFileSize: 1024,
+          }),
+          getSupabaseClient: () =>
+            ({
+              from() {
+                return {
+                  insert() {
+                    insertCalls += 1;
+                    return {
+                      select() {
+                        return {
+                          single: async () => ({
+                            data: null,
+                            error: { message: 'insert failed' },
+                          }),
+                        };
+                      },
+                    };
+                  },
+                };
+              },
+            }) as never,
+          logApiError: () => undefined,
+          logInfo: () => undefined,
+        }
+      ),
+      (error: unknown) => error instanceof AnalysisMasterProjectError && error.message === '创建分析项目失败'
+    );
 
-const pageSource = readSource('src/app/analysis-master/page.tsx');
-assert.match(pageSource, /Excel 批量导入/, '分析大师页应包含 Excel 批量导入入口');
-assert.match(pageSource, /导出结果|导出/, '分析大师页应包含导出入口');
-assert.match(pageSource, /分镜细节/, '分析大师页应展示分镜细节');
-
-const analyzeRouteSource = readSource('src/app/api/analysis-master/analyze/[id]/route.ts');
-assert.match(analyzeRouteSource, /enqueueAnalysisTaskForProject/, '单项分析接口应复用分析入队 helper');
-
-const projectsRouteSource = readSource('src/app/api/analysis-master/projects/route.ts');
-assert.match(projectsRouteSource, /createAnalysisProjectFromLink/, '项目创建接口应复用共享创建 helper');
-
-console.log('analysis-master main architecture assertions passed');
+    assert.equal(insertCalls, 1);
+    assert.deepEqual(deletedKeys.sort(), ['audio-key', 'video-key']);
+  });
+});

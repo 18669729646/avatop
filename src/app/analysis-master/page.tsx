@@ -21,6 +21,7 @@ import { useTaskQueue } from '@/lib/swr';
 const ANALYSIS_MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 
 const CHUNK_SIZE = 5 * 1024 * 1024;
+const PROJECT_PAGE_SIZE = 12;
 
 interface UploadState {
   phase: 'idle' | 'uploading' | 'done' | 'error';
@@ -126,6 +127,13 @@ interface BatchImportTaskResult {
   }>;
 }
 
+interface ProjectPagination {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
 function formatSize(size?: number) {
   if (!size) return '未知大小';
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)}KB`;
@@ -207,6 +215,12 @@ export default function AnalysisMasterPage() {
   const [uploadState, setUploadState] = useState<UploadState>({ phase: 'idle' });
   const [error, setError] = useState('');
   const [batchSummary, setBatchSummary] = useState<BatchImportSummary | null>(null);
+  const [projectPagination, setProjectPagination] = useState<ProjectPagination>({
+    page: 1,
+    pageSize: PROJECT_PAGE_SIZE,
+    total: 0,
+    totalPages: 0,
+  });
 
   const selectedProject = projects.find(project => project.id === selectedId) || projects[0];
   const batchTask = batchSummary ? queueTasks.find(task => task.id === batchSummary.taskId) || null : null;
@@ -218,16 +232,30 @@ export default function AnalysisMasterPage() {
     : 0;
   const batchStatus = batchTask?.status || batchSummary?.status || 'queued';
 
-  const loadProjects = useCallback(async () => {
-    const response = await authFetch('/api/analysis-master/projects');
+  const loadProjects = useCallback(async (targetPage = 1) => {
+    const response = await authFetch(`/api/analysis-master/projects?page=${targetPage}&pageSize=${PROJECT_PAGE_SIZE}`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || '获取分析项目失败');
     const list = (data.data || []) as AnalysisProject[];
+    const pagination = (data.pagination || {
+      page: targetPage,
+      pageSize: PROJECT_PAGE_SIZE,
+      total: list.length,
+      totalPages: list.length > 0 ? 1 : 0,
+    }) as ProjectPagination;
     setProjects(list);
+    setProjectPagination(pagination);
     // 仅在首次加载时自动选中第一个项目，避免手动选择触发重新请求
     if (isInitialLoadRef.current && list.length > 0 && !selectedId) {
       setSelectedId(list[0].id);
       isInitialLoadRef.current = false;
+    } else {
+      setSelectedId(currentSelectedId => {
+        if (list.some(project => project.id === currentSelectedId)) {
+          return currentSelectedId;
+        }
+        return list[0]?.id || '';
+      });
     }
   }, [selectedId]);
 
@@ -236,7 +264,7 @@ export default function AnalysisMasterPage() {
   loadProjectsRef.current = loadProjects;
 
   useEffect(() => {
-    loadProjectsRef.current().catch(err => setError(err.message));
+    loadProjectsRef.current(1).catch(err => setError(err.message));
   }, []);
 
   useEffect(() => {
@@ -335,7 +363,8 @@ export default function AnalysisMasterPage() {
       if (!response.ok) throw new Error(data.error || '创建失败');
       setSourceUrl('');
       setProjectName('');
-      await loadProjects();
+      await loadProjects(1);
+      setProjectPagination(prev => ({ ...prev, page: 1 }));
       setSelectedId(data.data.id);
       console.log('[从链接导入] 成功, projectId=', data.data.id);
     } catch (err) {
@@ -418,7 +447,8 @@ export default function AnalysisMasterPage() {
       setUploadState({ phase: 'done' });
       setFile(null);
       setProjectName('');
-      await loadProjects();
+      await loadProjects(1);
+      setProjectPagination(prev => ({ ...prev, page: 1 }));
       setSelectedId(projectId);
       setTimeout(() => setUploadState({ phase: 'idle' }), 2000);
     } catch (err) {
@@ -449,7 +479,8 @@ export default function AnalysisMasterPage() {
       if (!response.ok) throw new Error(data.error || '批量导入失败');
       setBatchSummary(data.data as BatchImportSummary);
       setBatchFile(null);
-      await loadProjects();
+      await loadProjects(1);
+      setProjectPagination(prev => ({ ...prev, page: 1 }));
     } catch (err) {
       setError(err instanceof Error ? err.message : '批量导入失败');
     } finally {
@@ -507,10 +538,10 @@ export default function AnalysisMasterPage() {
       const response = await authFetch(`/api/analysis-master/analyze/${id}`, { method: 'POST' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '分析失败');
-      await loadProjects();
+      await loadProjects(projectPagination.page);
     } catch (err) {
       setError(err instanceof Error ? err.message : '分析失败');
-      await loadProjects().catch(() => undefined);
+      await loadProjects(projectPagination.page).catch(() => undefined);
     } finally {
       setAnalyzingId('');
     }
@@ -526,10 +557,10 @@ export default function AnalysisMasterPage() {
       const response = await authFetch(`/api/analysis-master/analyze/${id}`, { method: 'POST' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '分析失败');
-      await loadProjects();
+      await loadProjects(projectPagination.page);
     } catch (err) {
       setError(err instanceof Error ? err.message : '分析失败');
-      await loadProjects().catch(() => undefined);
+      await loadProjects(projectPagination.page).catch(() => undefined);
     } finally {
       setAnalyzingId('');
     }
@@ -544,13 +575,7 @@ export default function AnalysisMasterPage() {
         const data = await response.json();
         throw new Error(data.error || '删除失败');
       }
-      setProjects(prev => {
-        const filtered = prev.filter(p => p.id !== id);
-        if (selectedId === id) {
-          setSelectedId(filtered[0]?.id || '');
-        }
-        return filtered;
-      });
+      await loadProjects(projectPagination.page);
     } catch (err) {
       alert(err instanceof Error ? err.message : '删除失败');
     } finally {
@@ -566,14 +591,14 @@ export default function AnalysisMasterPage() {
             <div className="flex items-center gap-3">
               <Sparkles className="w-5 h-5 text-purple-500" />
               <h1 className="text-lg sm:text-xl font-semibold">分析大师</h1>
-              <Badge variant="secondary">{projects.length} 个项目</Badge>
+              <Badge variant="secondary">{projectPagination.total || projects.length} 个项目</Badge>
             </div>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={() => exportProjects()} disabled={exporting}>
                 {exporting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />}
                 导出
               </Button>
-              <Button variant="outline" size="sm" onClick={() => loadProjects()} disabled={loading}>
+              <Button variant="outline" size="sm" onClick={() => loadProjects(projectPagination.page).catch(err => setError(err.message))} disabled={loading}>
                 <RefreshCw className="w-4 h-4 mr-1" />
                 刷新
               </Button>
@@ -732,6 +757,37 @@ export default function AnalysisMasterPage() {
                       </div>
                     </div>
                   ))}
+                  {projectPagination.totalPages > 1 && (
+                    <div className="flex items-center justify-between gap-2 pt-3">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (projectPagination.page > 1) {
+                            loadProjects(projectPagination.page - 1).catch(err => setError(err.message));
+                          }
+                        }}
+                        disabled={projectPagination.page <= 1}
+                      >
+                        上一页
+                      </Button>
+                      <div className="text-xs text-muted-foreground">
+                        第 {projectPagination.page} / {projectPagination.totalPages} 页
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (projectPagination.page < projectPagination.totalPages) {
+                            loadProjects(projectPagination.page + 1).catch(err => setError(err.message));
+                          }
+                        }}
+                        disabled={projectPagination.page >= projectPagination.totalPages}
+                      >
+                        下一页
+                      </Button>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>
