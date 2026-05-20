@@ -14,7 +14,6 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { authFetch, useAuth } from '@/lib/auth-context';
 import { useTaskEvents } from '@/hooks/use-task-events';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Download, FileSpreadsheet, Loader2, Music, Play, RefreshCw, Sparkles, Upload, Copy, Trash2 } from 'lucide-react';
 import { copyToClipboard } from '@/lib/prompt-templates';
 import { useTaskQueue } from '@/lib/swr';
@@ -94,6 +93,12 @@ interface AnalysisResult {
   cta_b: string;
   cta_c: string;
   cta_d: string;
+  /** 产品描述，SSE 映射来源 */
+  productDesc?: string;
+  /** 卖点列表，SSE 映射来源 */
+  sellingPoints?: unknown[];
+  /** 原始分析数据，用于 Excel 导出列映射 */
+  raw?: Record<string, unknown>;
 }
 
 interface AnalysisProject {
@@ -245,6 +250,8 @@ export default function AnalysisMasterPage() {
   const [previewProjectId, setPreviewProjectId] = useState<string>('');
   const [showPreview, setShowPreview] = useState(false);
   const isInitialLoadRef = useRef(true);
+  // 避免 loadProjects 闭包陷阱：用 ref 追踪 selectedId，不将其加入 useCallback 依赖
+  const selectedIdRef = useRef(selectedId);
   const [sourceUrl, setSourceUrl] = useState('');
   const [projectName, setProjectName] = useState('');
   const [file, setFile] = useState<File | null>(null);
@@ -265,7 +272,7 @@ export default function AnalysisMasterPage() {
   });
 
   const projects = useMemo(
-    () => mergeAnalysisMasterProjects(serverProjects, draftProjects) as AnalysisProject[],
+    () => mergeAnalysisMasterProjects(serverProjects, draftProjects) as unknown as AnalysisProject[],
     [draftProjects, serverProjects]
   );
 
@@ -295,7 +302,7 @@ export default function AnalysisMasterPage() {
     setServerProjects(list);
     setProjectPagination(pagination);
     // 仅在首次加载时自动选中第一个项目，避免手动选择触发重新请求
-    if (isInitialLoadRef.current && list.length > 0 && !selectedId) {
+    if (isInitialLoadRef.current && list.length > 0 && !selectedIdRef.current) {
       setSelectedId(list[0].id);
       isInitialLoadRef.current = false;
     } else {
@@ -306,11 +313,16 @@ export default function AnalysisMasterPage() {
         return list[0]?.id || '';
       });
     }
-  }, [selectedId]);
+  }, []); // 移除 selectedId 依赖，由 selectedIdRef 提供最新值
 
   // 保持 ref 指向最新的 loadProjects，避免 effect 依赖变化时重建定时器
   const loadProjectsRef = useRef(loadProjects);
   loadProjectsRef.current = loadProjects;
+
+  // selectedIdRef 与 selectedId 保持同步，供 loadProjects 闭包使用
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
 
   useEffect(() => {
     loadProjectsRef.current(1).catch(err => setError(err.message));

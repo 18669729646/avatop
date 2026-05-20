@@ -16,6 +16,12 @@ export interface AnalysisMasterListProject {
   name: string;
   sourceType: string;
   sourceUrl?: string;
+  videoUrl?: string;
+  videoDuration?: number;
+  fileSize?: number;
+  audioUrl?: string;
+  audioDuration?: number;
+  audioFileSize?: number;
   status: string;
   result?: unknown | null;
   error?: string | null;
@@ -118,7 +124,7 @@ export function saveAnalysisMasterDraftProjects(
 export function mergeAnalysisMasterProjects(
   serverProjects: AnalysisMasterListProject[],
   drafts: AnalysisMasterDraftProject[]
-): Array<AnalysisMasterListProject | AnalysisMasterDraftProject> {
+): (AnalysisMasterListProject | AnalysisMasterDraftProject)[] {
   const serverClientRequestIds = new Set(
     serverProjects
       .map(project => project.importMetadata?.clientRequestId)
