@@ -309,6 +309,7 @@ async function downloadUrlToBuffer(url: string, timeoutMs: number, maxBytes: num
 }
 
 async function downloadWithSsstik(url: string, timeoutMs: number, maxBytes: number): Promise<VideoDownloadResult> {
+  console.log(`[VideoDownloader] [ssstik] 开始下载，url=${url}, timeout=${timeoutMs}ms`);
   if (!isTiktokLikeUrl(url)) {
     throw new Error('ssstik 仅支持 TikTok/抖音类链接');
   }
@@ -329,6 +330,7 @@ async function downloadWithSsstik(url: string, timeoutMs: number, maxBytes: numb
   let lastError: Error | null = null;
   for (const endpoint of endpoints) {
     try {
+      console.log(`[VideoDownloader] [ssstik] 尝试 endpoint=${endpoint}`);
       const html = await fetchText(endpoint, timeoutMs, {
         method: 'POST',
         headers: {
@@ -345,44 +347,52 @@ async function downloadWithSsstik(url: string, timeoutMs: number, maxBytes: numb
         throw new Error('ssstik 响应中未找到可下载 MP4 地址');
       }
 
+      console.log(`[VideoDownloader] [ssstik] 提取到视频地址，size=${videoUrl.length}`);
       const downloaded = await downloadUrlToBuffer(videoUrl, timeoutMs, maxBytes);
+      console.log(`[VideoDownloader] [ssstik] 下载完成，bufferSize=${downloaded.buffer.length}`);
       return {
         ...downloaded,
         title: 'TikTok 视频',
         provider: 'ssstik',
       };
     } catch (error) {
+      console.warn(`[VideoDownloader] [ssstik] endpoint=${endpoint} 失败: ${(error as Error).message}`);
       lastError = error as Error;
     }
   }
 
+  console.error(`[VideoDownloader] [ssstik] 所有 endpoint 均失败`);
   throw lastError || new Error('ssstik 下载失败');
 }
 
 async function getYtDlpInfo(url: string, timeoutMs: number): Promise<YtDlpInfo> {
+  console.log(`[VideoDownloader] [yt-dlp] 获取元信息，url=${url}, timeout=${Math.min(timeoutMs, 60 * 1000)}ms`);
   const { stdout } = await execFileAsync(
     'yt-dlp',
     ['--dump-json', '--no-download', '--no-warnings', url],
     { timeout: Math.min(timeoutMs, 60 * 1000), maxBuffer: 10 * 1024 * 1024 }
   );
-
+  console.log(`[VideoDownloader] [yt-dlp] 元信息获取成功`);
   return JSON.parse(stdout.trim());
 }
 
 async function downloadWithYtDlp(url: string, options: VideoDownloadOptions): Promise<VideoDownloadResult> {
   const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
   const maxBytes = options.maxBytes || DEFAULT_MAX_BYTES;
+  console.log(`[VideoDownloader] [yt-dlp] 开始下载，url=${url}, timeout=${timeoutMs}ms`);
   const workDir = await mkdtemp(path.join(tmpdir(), `avatop-ytdlp-${options.projectId || 'tmp'}-`));
 
   try {
     const info = await getYtDlpInfo(url, timeoutMs);
     const outputTemplate = path.join(workDir, 'video.%(ext)s');
 
+    console.log(`[VideoDownloader] [yt-dlp] 开始下载视频文件，title=${info.title || 'unknown'}`);
     await execFileAsync(
       'yt-dlp',
       ['-f', 'best[ext=mp4]/best', '--merge-output-format', 'mp4', '-o', outputTemplate, '--no-warnings', url],
       { timeout: timeoutMs }
     );
+    console.log(`[VideoDownloader] [yt-dlp] 视频文件下载完成`);
 
     const files = (await readdir(workDir)).filter(file => file.startsWith('video.'));
     if (files.length === 0) {
@@ -391,6 +401,7 @@ async function downloadWithYtDlp(url: string, options: VideoDownloadOptions): Pr
 
     const videoPath = path.join(workDir, files[0]);
     const [buffer, fileStat] = await Promise.all([readFile(videoPath), stat(videoPath)]);
+    console.log(`[VideoDownloader] [yt-dlp] 文件读取完成，size=${fileStat.size}`);
     if (fileStat.size === 0) {
       throw new Error('yt-dlp 下载到的视频内容为空');
     }
@@ -398,6 +409,7 @@ async function downloadWithYtDlp(url: string, options: VideoDownloadOptions): Pr
       throw new Error(`视频文件过大，超过 ${Math.round(maxBytes / 1024 / 1024)}MB 限制`);
     }
 
+    console.log(`[VideoDownloader] [yt-dlp] 下载成功，bufferSize=${buffer.length}`);
     return {
       buffer,
       contentType: 'video/mp4',
@@ -414,26 +426,42 @@ async function downloadWithYtDlp(url: string, options: VideoDownloadOptions): Pr
 }
 
 export async function downloadVideoFromUrl(url: string, options: VideoDownloadOptions = {}): Promise<VideoDownloadResult> {
-  await assertPublicHttpUrl(url);
-  const provider = getConfiguredProvider(options.provider);
-  const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
-  const maxBytes = options.maxBytes || DEFAULT_MAX_BYTES;
+  console.log(`[VideoDownloader] >>> downloadVideoFromUrl 开始，url=${url}, provider=${options.provider || 'auto'}, timeout=${options.timeoutMs || DEFAULT_TIMEOUT_MS}ms`);
+  try {
+    await assertPublicHttpUrl(url);
+    const provider = getConfiguredProvider(options.provider);
+    const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
+    const maxBytes = options.maxBytes || DEFAULT_MAX_BYTES;
 
-  if (provider === 'ssstik') {
-    return downloadWithSsstik(url, timeoutMs, maxBytes);
-  }
-
-  if (provider === 'yt-dlp') {
-    return downloadWithYtDlp(url, options);
-  }
-
-  if (isTiktokLikeUrl(url)) {
-    try {
-      return await downloadWithSsstik(url, timeoutMs, maxBytes);
-    } catch (ssstikError) {
-      console.warn('[Video Downloader] ssstik failed, fallback to yt-dlp:', (ssstikError as Error).message);
+    if (provider === 'ssstik') {
+      const result = await downloadWithSsstik(url, timeoutMs, maxBytes);
+      console.log(`[VideoDownloader] <<< downloadVideoFromUrl 完成，provider=ssstik, size=${result.buffer.length}`);
+      return result;
     }
-  }
 
-  return downloadWithYtDlp(url, options);
+    if (provider === 'yt-dlp') {
+      const result = await downloadWithYtDlp(url, options);
+      console.log(`[VideoDownloader] <<< downloadVideoFromUrl 完成，provider=yt-dlp, size=${result.buffer.length}`);
+      return result;
+    }
+
+    if (isTiktokLikeUrl(url)) {
+      try {
+        console.log(`[VideoDownloader] [auto] 优先尝试 ssstik`);
+        const result = await downloadWithSsstik(url, timeoutMs, maxBytes);
+        console.log(`[VideoDownloader] <<< downloadVideoFromUrl 完成，provider=ssstik, size=${result.buffer.length}`);
+        return result;
+      } catch (ssstikError) {
+        console.warn(`[VideoDownloader] [auto] ssstik 失败，降级 yt-dlp: ${(ssstikError as Error).message}`);
+      }
+    }
+
+    console.log(`[VideoDownloader] [auto] 使用 yt-dlp 下载`);
+    const result = await downloadWithYtDlp(url, options);
+    console.log(`[VideoDownloader] <<< downloadVideoFromUrl 完成，provider=yt-dlp, size=${result.buffer.length}`);
+    return result;
+  } catch (error) {
+    console.error(`[VideoDownloader] <<< downloadVideoFromUrl 失败，url=${url}: ${(error as Error).message}`);
+    throw error;
+  }
 }

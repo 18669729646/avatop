@@ -82,7 +82,10 @@ export async function createAnalysisProjectFromLink(
   deps: AnalysisMasterProjectDeps = {}
 ) {
   const sourceUrl = params.sourceUrl.trim();
+  console.log(`[AnalysisProject] >>> createAnalysisProjectFromLink，userId=${params.userId}, url=${sourceUrl}, timeout=${params.downloadTimeoutMs || 60000}ms`);
+
   if (!sourceUrl) {
+    console.error(`[AnalysisProject] createAnalysisProjectFromLink 失败：链接为空`);
     throw new AnalysisMasterProjectError('请提供视频链接', 400);
   }
 
@@ -97,17 +100,21 @@ export async function createAnalysisProjectFromLink(
   const infoLog = deps.logInfo || logInfo;
 
   const projectId = createAnalysisProjectId();
+  console.log(`[AnalysisProject] 开始下载视频，projectId=${projectId}`);
   const downloaded = await download(sourceUrl, {
     projectId,
     provider: 'auto',
     maxBytes: ANALYSIS_MAX_VIDEO_BYTES,
     timeoutMs: params.downloadTimeoutMs,
   });
+  console.log(`[AnalysisProject] 视频下载成功，size=${downloaded.buffer.length}, provider=${downloaded.provider}`);
 
   const storageCheck = await storageQuota(params.userId, downloaded.buffer.length);
   if (!storageCheck.allowed) {
+    console.error(`[AnalysisProject] 存储空间不足，userId=${params.userId}, required=${downloaded.buffer.length}`);
     throw new AnalysisMasterProjectError(storageCheck.error || '存储空间不足', 507);
   }
+  console.log(`[AnalysisProject] 存储检查通过`);
 
   const importMetadata = {
     ...(params.importMetadata || {}),
@@ -120,12 +127,15 @@ export async function createAnalysisProjectFromLink(
   let audioKey: string | null = null;
 
   try {
+    console.log(`[AnalysisProject] 上传视频到 S3，projectId=${projectId}`);
     videoKey = await uploadFile({
       fileContent: downloaded.buffer,
       fileName: `analysis-master/source/${params.userId}/${projectId}.mp4`,
       contentType: downloaded.contentType,
     });
+    console.log(`[AnalysisProject] 视频上传成功，key=${videoKey}`);
 
+    console.log(`[AnalysisProject] 提取音频，projectId=${projectId}`);
     const audioResult = await extractAudio(downloaded.buffer, params.userId, projectId);
     audioKey = audioResult?.audioKey || null;
 
@@ -163,13 +173,17 @@ export async function createAnalysisProjectFromLink(
       throw new AnalysisMasterProjectError('创建分析项目失败', 500);
     }
 
+    console.log(`[AnalysisProject] 项目创建成功，projectId=${projectId}, status=draft`);
     infoLog('api', '创建分析大师链接项目', { projectId, provider: downloaded.provider }, params.userId);
     return mapAnalysisMasterProject(data);
   } catch (error) {
+    console.error(`[AnalysisProject] createAnalysisProjectFromLink 失败，projectId=${projectId}: ${(error as Error).message}`);
     if (videoKey) {
+      console.log(`[AnalysisProject] 清理已上传视频，key=${videoKey}`);
       await deleteFile(videoKey).catch(() => false);
     }
     if (audioKey) {
+      console.log(`[AnalysisProject] 清理已上传音频，key=${audioKey}`);
       await deleteFile(audioKey).catch(() => false);
     }
     if (error instanceof AnalysisMasterProjectError) {

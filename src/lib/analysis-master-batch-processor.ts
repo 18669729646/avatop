@@ -44,12 +44,16 @@ export async function executeAnalysisBatchImportTask(
   const params = task.params as AnalysisBatchImportTaskParams;
 
   if (!task.user_id) {
+    console.error(`[BatchImport] 任务 ${task.id} 缺少用户ID`);
     throw new Error('批量导入任务缺少用户ID');
   }
 
   if (!Array.isArray(params.imports) || params.imports.length === 0) {
+    console.error(`[BatchImport] 任务 ${task.id} 缺少导入数据`);
     throw new Error('批量导入任务缺少导入数据');
   }
+
+  console.log(`[BatchImport] 任务开始，batchId=${params.batchId}, totalRows=${params.totalRows}, userId=${task.user_id}`);
 
   const startedAt = task.started_at || new Date().toISOString();
   let createdRows = 0;
@@ -124,6 +128,8 @@ export async function executeAnalysisBatchImportTask(
   for (const [index, item] of params.imports.entries()) {
     let projectId: string | null = null;
 
+    console.log(`[BatchImport] 处理第 ${index + 1}/${params.totalRows} 条，url=${item.sourceUrl}`);
+
     try {
       const createProjectPromise = createProject({
         userId: task.user_id,
@@ -140,17 +146,21 @@ export async function executeAnalysisBatchImportTask(
         ),
       ]);
       projectId = String(project.id);
+      console.log(`[BatchImport] 第 ${index + 1} 条项目创建成功，projectId=${projectId}，开始入队分析任务`);
 
       await enqueueAnalysisTask({
         projectId,
         userId: task.user_id,
         triggerProcessing: false,
       });
+      console.log(`[BatchImport] 第 ${index + 1} 条分析任务入队成功`);
 
       createdRows += 1;
+      console.log(`[BatchImport] 第 ${index + 1} 条处理完成，createdRows=${createdRows}/${params.totalRows}`);
     } catch (error) {
       failedRows += 1;
       const message = error instanceof Error ? error.message : '批量导入失败';
+      console.error(`[BatchImport] 第 ${index + 1} 条处理失败：${message}`);
       failedItems.push({ sourceUrl: item.sourceUrl, error: message });
 
       if (projectId) {
@@ -204,6 +214,8 @@ export async function executeAnalysisBatchImportTask(
       failedRows,
     }, task.user_id);
   }
+
+  console.log(`[BatchImport] 任务完成，batchId=${params.batchId}, createdRows=${createdRows}, failedRows=${failedRows}`);
 
   emitLogInfo('task', '批量导入完成', {
     taskId: task.id,
