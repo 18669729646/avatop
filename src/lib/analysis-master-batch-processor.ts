@@ -119,16 +119,26 @@ export async function executeAnalysisBatchImportTask(
     });
   };
 
+  const BATCH_DOWNLOAD_TIMEOUT_MS = 60 * 1000; // 批量导入中每个视频下载最多 60 秒
+
   for (const [index, item] of params.imports.entries()) {
     let projectId: string | null = null;
 
     try {
-      const project = await createProject({
+      const createProjectPromise = createProject({
         userId: task.user_id,
         sourceUrl: item.sourceUrl,
         name: resolveBatchProjectName(item.metadata, index),
         importMetadata: item.metadata,
+        downloadTimeoutMs: BATCH_DOWNLOAD_TIMEOUT_MS,
       });
+
+      const project = await Promise.race([
+        createProjectPromise,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`视频下载超时（${BATCH_DOWNLOAD_TIMEOUT_MS / 1000}秒）`)), BATCH_DOWNLOAD_TIMEOUT_MS + 5_000)
+        ),
+      ]);
       projectId = String(project.id);
 
       await enqueueAnalysisTask({

@@ -77,6 +77,7 @@ export async function createAnalysisProjectFromLink(
     name?: string;
     importMetadata?: Record<string, string>;
     clientRequestId?: string;
+    downloadTimeoutMs?: number;
   },
   deps: AnalysisMasterProjectDeps = {}
 ) {
@@ -100,6 +101,7 @@ export async function createAnalysisProjectFromLink(
     projectId,
     provider: 'auto',
     maxBytes: ANALYSIS_MAX_VIDEO_BYTES,
+    timeoutMs: params.downloadTimeoutMs,
   });
 
   const storageCheck = await storageQuota(params.userId, downloaded.buffer.length);
