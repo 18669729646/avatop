@@ -123,60 +123,99 @@ export async function executeAnalysisBatchImportTask(
     });
   };
 
+  const BATCH_SIZE = 3; // 每批并行处理数量
+  const BATCH_INTERVAL_MS = 2000; // 批次间隔（毫秒）
   const BATCH_DOWNLOAD_TIMEOUT_MS = 60 * 1000; // 批量导入中每个视频下载最多 60 秒
 
-  for (const [index, item] of params.imports.entries()) {
-    let projectId: string | null = null;
+  // 分批处理，每批并行执行
+  for (let batchStart = 0; batchStart < params.totalRows; batchStart += BATCH_SIZE) {
+    const batchEnd = Math.min(batchStart + BATCH_SIZE, params.totalRows);
+    const batchItems = params.imports.slice(batchStart, batchEnd);
+    const batchNumber = Math.floor(batchStart / BATCH_SIZE) + 1;
+    const totalBatches = Math.ceil(params.totalRows / BATCH_SIZE);
 
-    console.log(`[BatchImport] 处理第 ${index + 1}/${params.totalRows} 条，url=${item.sourceUrl}`);
+    console.log(`[BatchImport] 开始批次 ${batchNumber}/${totalBatches}，包含第 ${batchStart + 1}-${batchEnd} 条（共 ${params.totalRows} 条）`);
 
-    try {
-      const createProjectPromise = createProject({
-        userId: task.user_id,
-        sourceUrl: item.sourceUrl,
-        name: resolveBatchProjectName(item.metadata, index),
-        importMetadata: item.metadata,
-        downloadTimeoutMs: BATCH_DOWNLOAD_TIMEOUT_MS,
-      });
+    // 本批次内并行处理所有视频
+    const batchPromises = batchItems.map(async (item, batchIndex) => {
+      const index = batchStart + batchIndex;
+      let projectId: string | null = null;
 
-      const project = await Promise.race([
-        createProjectPromise,
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`视频下载超时（${BATCH_DOWNLOAD_TIMEOUT_MS / 1000}秒）`)), BATCH_DOWNLOAD_TIMEOUT_MS + 5_000)
-        ),
-      ]);
-      projectId = String(project.id);
-      console.log(`[BatchImport] 第 ${index + 1} 条项目创建成功，projectId=${projectId}，开始入队分析任务`);
+      console.log(`[BatchImport] 批次 ${batchNumber} 第 ${batchIndex + 1}/${batchItems.length} 条：url=${item.sourceUrl}`);
 
-      await enqueueAnalysisTask({
-        projectId,
-        userId: task.user_id,
-        triggerProcessing: false,
-      });
-      console.log(`[BatchImport] 第 ${index + 1} 条分析任务入队成功`);
+      try {
+        const createProjectPromise = createProject({
+          userId: task.user_id!,
+          sourceUrl: item.sourceUrl,
+          name: resolveBatchProjectName(item.metadata, index),
+          importMetadata: item.metadata,
+          downloadTimeoutMs: BATCH_DOWNLOAD_TIMEOUT_MS,
+        });
 
-      createdRows += 1;
-      console.log(`[BatchImport] 第 ${index + 1} 条处理完成，createdRows=${createdRows}/${params.totalRows}`);
-    } catch (error) {
-      failedRows += 1;
-      const message = error instanceof Error ? error.message : '批量导入失败';
-      console.error(`[BatchImport] 第 ${index + 1} 条处理失败：${message}`);
-      failedItems.push({ sourceUrl: item.sourceUrl, error: message });
+        const project = await Promise.race([
+          createProjectPromise,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`视频下载超时（${BATCH_DOWNLOAD_TIMEOUT_MS / 1000}秒）`)), BATCH_DOWNLOAD_TIMEOUT_MS + 5_000)
+          ),
+        ]);
+        projectId = String(project.id);
+        console.log(`[BatchImport] 批次 ${batchNumber} 第 ${batchIndex + 1} 条项目创建成功，projectId=${projectId}，开始入队分析任务`);
 
-      if (projectId) {
-        await supabase
-          .from('analysis_master_projects')
-          .update({
-            status: 'failed',
-            error: message,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', projectId)
-          .eq('user_id', task.user_id);
+        await enqueueAnalysisTask({
+          projectId,
+          userId: task.user_id!,
+          triggerProcessing: false,
+        });
+        console.log(`[BatchImport] 批次 ${batchNumber} 第 ${batchIndex + 1} 条分析任务入队成功`);
+
+        console.log(`[BatchImport] 批次 ${batchNumber} 第 ${batchIndex + 1} 条处理完成`);
+        return { index, projectId, success: true };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '批量导入失败';
+        console.error(`[BatchImport] 批次 ${batchNumber} 第 ${batchIndex + 1} 条处理失败：${message}`);
+
+        if (projectId) {
+          await supabase
+            .from('analysis_master_projects')
+            .update({
+              status: 'failed',
+              error: message,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', projectId)
+            .eq('user_id', task.user_id!);
+        }
+
+        return { index, projectId, success: false, error: message };
+      }
+    });
+
+    // 等待本批次全部完成
+    const batchResults = await Promise.all(batchPromises);
+
+    // 统计本批次结果
+    for (const r of batchResults) {
+      if (r.success) {
+        createdRows += 1;
+      } else {
+        failedRows += 1;
+        failedItems.push({
+          sourceUrl: params.imports[r.index].sourceUrl,
+          error: r.error || '未知错误',
+        });
       }
     }
 
+    console.log(`[BatchImport] 批次 ${batchNumber} 完成，createdRows=${createdRows}，failedRows=${failedRows}`);
+
+    // 更新进度
     await persistProgress();
+
+    // 如果不是最后一批，等待间隔后继续下一批
+    if (batchEnd < params.totalRows) {
+      console.log(`[BatchImport] 等待 ${BATCH_INTERVAL_MS / 1000} 秒后开始下一批次...`);
+      await new Promise(resolve => setTimeout(resolve, BATCH_INTERVAL_MS));
+    }
   }
 
   const result = {

@@ -832,9 +832,7 @@ export default function AnalysisMasterPage() {
                           <span className="font-medium text-foreground break-all text-right">{batchSummary.batchId}</span>
                         </div>
                       </div>
-                      <Button variant="ghost" size="sm" className="w-full" onClick={() => router.push('/queue')}>
-                        前往任务队列
-                      </Button>
+
                     </div>
                   )}
                 </CardContent>
