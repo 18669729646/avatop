@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppLayout } from '@/components/app-layout';
 import { Button } from '@/components/ui/button';
@@ -431,7 +431,33 @@ export default function AnalysisMasterPage() {
     [draftProjects, serverProjects]
   );
 
-  const selectedProject = projects.find(project => project.id === selectedId) || projects[0];
+  // 稳定 selectedProject 引用：仅当关键业务字段变化时才更新，避免 SWR 轮询导致的无效重渲染
+  const rawSelectedProject = projects.find(project => project.id === selectedId) || projects[0];
+  const stableProjectRef = useRef(rawSelectedProject);
+  if (
+    !rawSelectedProject && !stableProjectRef.current ||
+    rawSelectedProject && !stableProjectRef.current ||
+    !rawSelectedProject && stableProjectRef.current
+  ) {
+    stableProjectRef.current = rawSelectedProject;
+  } else if (rawSelectedProject && stableProjectRef.current) {
+    const prev = stableProjectRef.current;
+    const curr = rawSelectedProject;
+    if (
+      prev.id !== curr.id ||
+      prev.status !== curr.status ||
+      prev.error !== curr.error ||
+      prev.optimisticStatus !== curr.optimisticStatus ||
+      Boolean(prev.result) !== Boolean(curr.result) ||
+      (prev.result && curr.result && JSON.stringify(prev.result) !== JSON.stringify(curr.result)) ||
+      prev.videoDuration !== curr.videoDuration ||
+      prev.audioDuration !== curr.audioDuration ||
+      prev.fileSize !== curr.fileSize
+    ) {
+      stableProjectRef.current = rawSelectedProject;
+    }
+  }
+  const selectedProject = stableProjectRef.current;
   const selectedProjectIsOptimistic = Boolean(selectedProject?.optimisticStatus);
   const displayedProjectCount = projectPagination.total + draftProjects.length;
   const batchTask = batchSummary ? queueTasks.find(task => task.id === batchSummary.taskId) || null : null;
