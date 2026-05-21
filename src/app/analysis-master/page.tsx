@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppLayout } from '@/components/app-layout';
 import { Button } from '@/components/ui/button';
@@ -667,7 +667,7 @@ export default function AnalysisMasterPage() {
     }
   };
 
-  const exportProjects = async (projectIds?: string[]) => {
+  const exportProjects = useCallback(async (projectIds?: string[]) => {
     setExporting(true);
     setError('');
     try {
@@ -697,9 +697,9 @@ export default function AnalysisMasterPage() {
     } finally {
       setExporting(false);
     }
-  };
+  }, []);
 
-  const analyzeProject = async (id: string) => {
+  const analyzeProject = useCallback(async (id: string) => {
     setAnalyzingId(id);
     setError('');
     try {
@@ -724,7 +724,7 @@ export default function AnalysisMasterPage() {
     } finally {
       setAnalyzingId('');
     }
-  };
+  }, [isAdmin, mutateProjects]);
 
   const confirmAnalyze = async () => {
     const id = previewProjectId;
