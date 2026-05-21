@@ -126,21 +126,17 @@ interface AnalysisProject {
 interface BatchImportSummary {
   batchId: string;
   taskId: string;
+  sourceFileName?: string;
   total: number;
   limit: number;
   status: string;
-}
-
-interface BatchImportTaskResult {
-  batchId: string;
-  sourceFileName?: string;
-  totalRows: number;
-  createdRows: number;
-  failedRows: number;
+  createdRows?: number;
+  failedRows?: number;
   failedItems?: Array<{
     sourceUrl: string;
     error: string;
   }>;
+  error?: string;
 }
 
 interface ProjectPagination {
@@ -280,9 +276,9 @@ export default function AnalysisMasterPage() {
   const selectedProjectIsOptimistic = Boolean(selectedProject?.optimisticStatus);
   const displayedProjectCount = projectPagination.total + draftProjects.length;
   const batchTask = batchSummary ? queueTasks.find(task => task.id === batchSummary.taskId) || null : null;
-  const batchTaskResult = batchTask?.result as BatchImportTaskResult | undefined;
-  const batchTotal = batchTaskResult?.totalRows ?? batchSummary?.total ?? 0;
-  const batchProcessed = batchTaskResult ? batchTaskResult.createdRows + batchTaskResult.failedRows : 0;
+  const batchTaskResult = batchTask?.result as BatchImportSummary | undefined;
+  const batchTotal = batchTaskResult?.total ?? batchSummary?.total ?? 0;
+  const batchProcessed = (batchTaskResult?.createdRows ?? 0) + (batchTaskResult?.failedRows ?? 0);
   const batchProgress = batchTotal > 0
     ? Math.min(100, Math.round((batchProcessed / batchTotal) * 100))
     : 0;
@@ -827,10 +823,33 @@ export default function AnalysisMasterPage() {
                           <span className="text-muted-foreground">已处理</span>
                           <span className="font-medium text-foreground">{batchProcessed}</span>
                         </div>
+                        {(batchSummary.failedRows ?? 0) > 0 && (
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-muted-foreground">失败</span>
+                            <span className="font-medium text-destructive">{batchSummary.failedRows}</span>
+                          </div>
+                        )}
                         <div className="flex items-center justify-between gap-3">
                           <span className="text-muted-foreground">批次编号</span>
                           <span className="font-medium text-foreground break-all text-right">{batchSummary.batchId}</span>
                         </div>
+                        {batchSummary.failedItems && batchSummary.failedItems.length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-border/50 space-y-1.5">
+                            <div className="text-xs font-medium text-muted-foreground">失败详情（{batchSummary.failedRows} 条）</div>
+                            {batchSummary.failedItems.map((item, idx) => (
+                              <div key={idx} className="text-xs bg-destructive/5 border border-destructive/20 rounded px-2 py-1.5">
+                                <div className="text-destructive font-medium truncate">{item.sourceUrl}</div>
+                                <div className="text-muted-foreground mt-0.5">{item.error}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {batchSummary && batchTask?.status === 'failed' && !batchSummary.error && (
+                          <div className="mt-3 p-3 bg-destructive/5 border border-destructive/20 rounded-lg">
+                            <div className="text-sm font-medium text-destructive">批量导入失败</div>
+                            <div className="text-xs text-muted-foreground mt-1">{batchTask.error || '任务执行异常，请重试'}</div>
+                          </div>
+                        )}
                       </div>
 
                     </div>
