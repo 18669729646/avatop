@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppLayout } from '@/components/app-layout';
 import { Button } from '@/components/ui/button';
@@ -227,6 +227,179 @@ function sceneDetailFields(scene: AnalysisScene) {
     ['映射备注', scene.mappingNotes],
   ].filter(([, value]) => value);
 }
+
+// 详情面板：仅在选中项目相关数据变化时重渲染
+interface ProjectPanelProps {
+  selectedProject?: AnalysisProject;
+  selectedProjectIsOptimistic: boolean;
+  analyzingId: string;
+  exporting: boolean;
+  analyzeProject: (id: string) => Promise<void>;
+  exportProjects: (ids?: string[]) => Promise<void>;
+}
+
+const ProjectPanel = React.memo<ProjectPanelProps>(({
+  selectedProject,
+  selectedProjectIsOptimistic,
+  analyzingId,
+  exporting,
+  analyzeProject,
+  exportProjects,
+}) => {
+  if (!selectedProject) {
+    return (
+      <div className="flex-1 space-y-4 min-w-0">
+        <Card className="border-dashed shadow-sm">
+          <CardContent className="py-20 text-center text-muted-foreground">创建项目后开始分析</CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 space-y-4 min-w-0">
+      <Card className="shadow-sm">
+        <CardHeader className="space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <CardTitle>{selectedProject.name}</CardTitle>
+              <div className="text-sm text-muted-foreground mt-1">{getProjectStatusLabel(selectedProject)} · {formatSize(selectedProject.fileSize)}</div>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button variant="outline" onClick={() => exportProjects([selectedProject.id])} disabled={exporting || !selectedProject.result || selectedProjectIsOptimistic}>
+                {exporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+                导出结果
+              </Button>
+              <Button
+                className={selectedProject.status === 'failed' ? 'bg-red-600 hover:bg-red-700' : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700'}
+                onClick={() => analyzeProject(selectedProject.id)}
+                disabled={selectedProjectIsOptimistic || analyzingId === selectedProject.id || selectedProject.status === 'analyzing'}
+              >
+                {analyzingId === selectedProject.id || selectedProject.status === 'analyzing' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+                {selectedProject.status === 'failed' ? '重新分析' : '开始分析'}
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {selectedProject.videoUrl && (
+            <video key={selectedProject.id + '-video'} src={selectedProject.videoUrl} controls className="w-full max-h-[420px] rounded-lg bg-black" />
+          )}
+          {selectedProject.audioUrl && (
+            <div className="rounded-lg border">
+              <div className="flex items-center gap-2 px-3 py-2 border-b bg-muted/50 rounded-t-lg">
+                <Music className="w-4 h-4 text-muted-foreground" />
+                <span className="text-xs font-medium">音频 <span className="text-muted-foreground">({Math.floor((selectedProject.audioDuration || 0) / 60)}:{String((selectedProject.audioDuration || 0) % 60).padStart(2, '0')})</span></span>
+              </div>
+              <div className="px-3 py-2">
+                <audio controls className="w-full h-8"><source src={selectedProject.audioUrl} type="audio/mpeg" /></audio>
+              </div>
+            </div>
+          )}
+          {selectedProject.error && <div className="text-sm text-destructive bg-destructive/10 rounded-md p-3">{selectedProject.error}</div>}
+          {selectedProject.optimisticStatus === 'creating' && (
+            <div className="text-sm text-muted-foreground bg-muted/50 rounded-md p-3">
+              正在创建项目，完成后会自动进入历史项目列表。
+            </div>
+          )}
+          {selectedProject.optimisticStatus === 'failed' && (
+            <div className="text-sm text-destructive bg-destructive/10 rounded-md p-3">
+              创建失败，项目已保留在本地列表中，刷新后仍会显示。
+            </div>
+          )}
+          {selectedProject.result && (
+            <>
+              <div className="space-y-2">
+                {[
+                  { label: '画面提示词', value: selectedProject.result.imagePrompt },
+                  { label: '视频提示词', value: selectedProject.result.videoPrompt },
+                  { label: '台词原文', value: selectedProject.result.dialogue_vo_original },
+                  { label: '台词中文', value: selectedProject.result.dialogue_vo_zh },
+                  {
+                    label: 'CTA',
+                    value: [selectedProject.result.cta_a, selectedProject.result.cta_b, selectedProject.result.cta_c, selectedProject.result.cta_d].filter(Boolean).join(' / ')
+                  },
+                ].map(({ label, value }) => value ? (
+                  <div key={label} className="rounded-lg border bg-muted/50">
+                    <div className="flex items-center justify-between px-3 py-2 border-b bg-muted rounded-t-lg">
+                      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+                      <button
+                        onClick={() => copyToClipboard(value)}
+                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition"
+                        title="复制"
+                      >
+                        <Copy className="w-3 h-3" />
+                        复制
+                      </button>
+                    </div>
+                    <div className="p-3 text-sm whitespace-pre-wrap">{value}</div>
+                  </div>
+                ) : null)}
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {selectedProject.result?.scenes?.map(scene => (
+        <Card key={scene.id} className="shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-base">#{scene.order} {scene.title}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <p className="text-muted-foreground">{scene.description}</p>
+            <div>
+              <div className="font-medium mb-1">图片提示词</div>
+              <div className="rounded-md bg-muted p-3 whitespace-pre-wrap">{scene.imagePrompt}</div>
+            </div>
+            <div>
+              <div className="font-medium mb-1">视频提示词</div>
+              <div className="rounded-md bg-muted p-3 whitespace-pre-wrap">{scene.videoPrompt}</div>
+            </div>
+            {(scene.speechText || scene.sellingPoint) && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div><span className="font-medium">口播：</span>{scene.speechText || '无'}</div>
+                <div><span className="font-medium">卖点：</span>{scene.sellingPoint || '无'}</div>
+              </div>
+            )}
+            {sceneDetailFields(scene).length > 0 && (
+              <div className="rounded-md border">
+                <div className="border-b px-3 py-2 font-medium">分镜细节</div>
+                <div className="grid gap-0 sm:grid-cols-2">
+                  {sceneDetailFields(scene).map(([label, value]) => (
+                    <div key={label} className="border-b px-3 py-2 last:border-b-0 sm:odd:border-r">
+                      <div className="text-xs text-muted-foreground mb-1">{label}</div>
+                      <div className="whitespace-pre-wrap">{value}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}, (prev, next) => {
+  // 仅当选中项目 ID 变化、或关键业务数据（status/result/error/optimisticStatus）变化时才重渲染
+  const prevP = prev.selectedProject;
+  const nextP = next.selectedProject;
+  if (!prevP && !nextP) return true; // 都是 null，不重渲染
+  if (!prevP || !nextP) return false; // 一个是 null，需要重渲染
+  return (
+    prevP.id === nextP.id &&
+    prevP.status === nextP.status &&
+    prevP.error === nextP.error &&
+    prevP.optimisticStatus === nextP.optimisticStatus &&
+    JSON.stringify(prevP.result) === JSON.stringify(nextP.result) &&
+    prevP.videoUrl === nextP.videoUrl &&
+    prevP.audioUrl === nextP.audioUrl &&
+    prev.analyzingId === next.analyzingId &&
+    prev.exporting === next.exporting
+  );
+});
+ProjectPanel.displayName = 'ProjectPanel';
+
 
 export default function AnalysisMasterPage() {
   const router = useRouter();
@@ -847,136 +1020,14 @@ export default function AnalysisMasterPage() {
               </Card>
             </div>
 
-            <div className="flex-1 space-y-4 min-w-0">
-              {!selectedProject ? (
-                <Card className="border-dashed shadow-sm">
-                  <CardContent className="py-20 text-center text-muted-foreground">创建项目后开始分析</CardContent>
-                </Card>
-              ) : (
-                <>
-                  <Card className="shadow-sm">
-                    <CardHeader className="space-y-3">
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <div>
-                          <CardTitle>{selectedProject.name}</CardTitle>
-                          <div className="text-sm text-muted-foreground mt-1">{getProjectStatusLabel(selectedProject)} · {formatSize(selectedProject.fileSize)}</div>
-                        </div>
-                        <div className="flex flex-col sm:flex-row gap-2">
-                          <Button variant="outline" onClick={() => exportProjects([selectedProject.id])} disabled={exporting || !selectedProject.result || selectedProjectIsOptimistic}>
-                            {exporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
-                            导出结果
-                          </Button>
-                          <Button
-                            className={selectedProject.status === 'failed' ? 'bg-red-600 hover:bg-red-700' : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700'}
-                            onClick={() => analyzeProject(selectedProject.id)}
-                            disabled={selectedProjectIsOptimistic || analyzingId === selectedProject.id || selectedProject.status === 'analyzing'}
-                          >
-                            {analyzingId === selectedProject.id || selectedProject.status === 'analyzing' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
-                            {selectedProject.status === 'failed' ? '重新分析' : '开始分析'}
-                          </Button>
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      {selectedProject.videoUrl && (
-                        <video src={selectedProject.videoUrl} controls className="w-full max-h-[420px] rounded-lg bg-black" />
-                      )}
-                      {selectedProject.audioUrl && (
-                        <div className="rounded-lg border">
-                          <div className="flex items-center gap-2 px-3 py-2 border-b bg-muted/50 rounded-t-lg">
-                            <Music className="w-4 h-4 text-muted-foreground" />
-                            <span className="text-xs font-medium">音频 <span className="text-muted-foreground">({Math.floor((selectedProject.audioDuration || 0) / 60)}:{String((selectedProject.audioDuration || 0) % 60).padStart(2, '0')})</span></span>
-                          </div>
-                          <div className="px-3 py-2">
-                            <audio controls className="w-full h-8"><source src={selectedProject.audioUrl} type="audio/mpeg" /></audio>
-                          </div>
-                        </div>
-                      )}
-                      {selectedProject.error && <div className="text-sm text-destructive bg-destructive/10 rounded-md p-3">{selectedProject.error}</div>}
-                      {selectedProject.optimisticStatus === 'creating' && (
-                        <div className="text-sm text-muted-foreground bg-muted/50 rounded-md p-3">
-                          正在创建项目，完成后会自动进入历史项目列表。
-                        </div>
-                      )}
-                      {selectedProject.optimisticStatus === 'failed' && (
-                        <div className="text-sm text-destructive bg-destructive/10 rounded-md p-3">
-                          创建失败，项目已保留在本地列表中，刷新后仍会显示。
-                        </div>
-                      )}
-                      {selectedProject.result && (
-                        <>
-                          <div className="space-y-2">
-                            {[
-                              { label: '画面提示词', value: selectedProject.result.imagePrompt },
-                              { label: '视频提示词', value: selectedProject.result.videoPrompt },
-                              { label: '台词原文', value: selectedProject.result.dialogue_vo_original },
-                              { label: '台词中文', value: selectedProject.result.dialogue_vo_zh },
-                              {
-                                label: 'CTA',
-                                value: [selectedProject.result.cta_a, selectedProject.result.cta_b, selectedProject.result.cta_c, selectedProject.result.cta_d].filter(Boolean).join(' / ')
-                              },
-                            ].map(({ label, value }) => value ? (
-                              <div key={label} className="rounded-lg border bg-muted/50">
-                                <div className="flex items-center justify-between px-3 py-2 border-b bg-muted rounded-t-lg">
-                                  <span className="text-xs font-medium text-muted-foreground">{label}</span>
-                                  <button
-                                    onClick={() => copyToClipboard(value)}
-                                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition"
-                                    title="复制"
-                                  >
-                                    <Copy className="w-3 h-3" />
-                                    复制
-                                  </button>
-                                </div>
-                                <div className="p-3 text-sm whitespace-pre-wrap">{value}</div>
-                              </div>
-                            ) : null)}
-                          </div>
-                        </>
-                      )}
-                    </CardContent>
-                  </Card>
-
-                  {selectedProject.result?.scenes?.map(scene => (
-                    <Card key={scene.id} className="shadow-sm">
-                      <CardHeader>
-                        <CardTitle className="text-base">#{scene.order} {scene.title}</CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-3 text-sm">
-                        <p className="text-muted-foreground">{scene.description}</p>
-                        <div>
-                          <div className="font-medium mb-1">图片提示词</div>
-                          <div className="rounded-md bg-muted p-3 whitespace-pre-wrap">{scene.imagePrompt}</div>
-                        </div>
-                        <div>
-                          <div className="font-medium mb-1">视频提示词</div>
-                          <div className="rounded-md bg-muted p-3 whitespace-pre-wrap">{scene.videoPrompt}</div>
-                        </div>
-                        {(scene.speechText || scene.sellingPoint) && (
-                          <div className="grid gap-3 sm:grid-cols-2">
-                            <div><span className="font-medium">口播：</span>{scene.speechText || '无'}</div>
-                            <div><span className="font-medium">卖点：</span>{scene.sellingPoint || '无'}</div>
-                          </div>
-                        )}
-                        {sceneDetailFields(scene).length > 0 && (
-                          <div className="rounded-md border">
-                            <div className="border-b px-3 py-2 font-medium">分镜细节</div>
-                            <div className="grid gap-0 sm:grid-cols-2">
-                              {sceneDetailFields(scene).map(([label, value]) => (
-                                <div key={label} className="border-b px-3 py-2 last:border-b-0 sm:odd:border-r">
-                                  <div className="text-xs text-muted-foreground mb-1">{label}</div>
-                                  <div className="whitespace-pre-wrap">{value}</div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))}
-                </>
-              )}
-            </div>
+<ProjectPanel
+                  selectedProject={selectedProject}
+                  selectedProjectIsOptimistic={selectedProjectIsOptimistic}
+                  analyzingId={analyzingId}
+                  exporting={exporting}
+                  analyzeProject={analyzeProject}
+                  exportProjects={exportProjects}
+                />
           </div>
         </ScrollArea>
 
