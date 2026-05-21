@@ -775,6 +775,7 @@ export default function AnalysisMasterPage() {
                   <CardTitle className="text-base">Excel 批量导入</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
+                  {error && !batchSummary && <div className="text-sm text-destructive bg-destructive/10 rounded-md p-3">{error}</div>}
                   <Input type="file" accept=".xlsx,.xls" onChange={event => setBatchFile(event.target.files?.[0] || null)} />
                   <Button variant="outline" className="w-full" onClick={importFromExcel} disabled={batchImporting || !batchFile}>
                     {batchImporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileSpreadsheet className="w-4 h-4 mr-2" />}
