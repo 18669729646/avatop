@@ -25,3 +25,6 @@ export { useTemplates } from './use-templates';
 
 // 任务队列相关
 export { useTaskQueue, useTaskStats } from './use-tasks';
+
+// 分析大师项目列表相关
+export { useAnalysisMasterProjects } from './use-analysis-master-projects';

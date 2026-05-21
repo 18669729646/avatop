@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppLayout } from '@/components/app-layout';
 import { Button } from '@/components/ui/button';
@@ -17,6 +17,7 @@ import { useTaskEvents } from '@/hooks/use-task-events';
 import { Download, FileSpreadsheet, Loader2, Music, Play, RefreshCw, Sparkles, Upload, Copy, Trash2 } from 'lucide-react';
 import { copyToClipboard } from '@/lib/prompt-templates';
 import { useTaskQueue } from '@/lib/swr';
+import { useAnalysisMasterProjects } from '@/lib/swr';
 import {
   createAnalysisMasterDraftProject,
   loadAnalysisMasterDraftProjects,
@@ -139,13 +140,6 @@ interface BatchImportSummary {
   error?: string;
 }
 
-interface ProjectPagination {
-  page: number;
-  pageSize: number;
-  total: number;
-  totalPages: number;
-}
-
 function formatSize(size?: number) {
   if (!size) return '未知大小';
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)}KB`;
@@ -239,15 +233,11 @@ export default function AnalysisMasterPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const { tasks: queueTasks } = useTaskQueue('mine', user?.id, { excludeAnalysisMaster: false });
-  const [serverProjects, setServerProjects] = useState<AnalysisProject[]>([]);
   const [draftProjects, setDraftProjects] = useState<AnalysisMasterDraftProject[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
   const [previewData, setPreviewData] = useState<Record<string, unknown> | null>(null);
   const [previewProjectId, setPreviewProjectId] = useState<string>('');
   const [showPreview, setShowPreview] = useState(false);
-  const isInitialLoadRef = useRef(true);
-  // 避免 loadProjects 闭包陷阱：用 ref 追踪 selectedId，不将其加入 useCallback 依赖
-  const selectedIdRef = useRef(selectedId);
   const [sourceUrl, setSourceUrl] = useState('');
   const [projectName, setProjectName] = useState('');
   const [file, setFile] = useState<File | null>(null);
@@ -260,12 +250,7 @@ export default function AnalysisMasterPage() {
   const [uploadState, setUploadState] = useState<UploadState>({ phase: 'idle' });
   const [error, setError] = useState('');
   const [batchSummary, setBatchSummary] = useState<BatchImportSummary | null>(null);
-  const [projectPagination, setProjectPagination] = useState<ProjectPagination>({
-    page: 1,
-    pageSize: PROJECT_PAGE_SIZE,
-    total: 0,
-    totalPages: 0,
-  });
+  const { projects: serverProjects, pagination: projectPagination, mutate: mutateProjects, isLoading: isProjectsLoading } = useAnalysisMasterProjects(user?.id);
 
   const projects = useMemo(
     () => mergeAnalysisMasterProjects(serverProjects, draftProjects) as unknown as AnalysisProject[],
@@ -283,46 +268,6 @@ export default function AnalysisMasterPage() {
     ? Math.min(100, Math.round((batchProcessed / batchTotal) * 100))
     : 0;
   const batchStatus = batchTask?.status || batchSummary?.status || 'queued';
-
-  const loadProjects = useCallback(async (targetPage = 1) => {
-    const response = await authFetch(`/api/analysis-master/projects?page=${targetPage}&pageSize=${PROJECT_PAGE_SIZE}`);
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || '获取分析项目失败');
-    const list = (data.data || []) as AnalysisProject[];
-    const pagination = (data.pagination || {
-      page: targetPage,
-      pageSize: PROJECT_PAGE_SIZE,
-      total: list.length,
-      totalPages: list.length > 0 ? 1 : 0,
-    }) as ProjectPagination;
-    setServerProjects(list);
-    setProjectPagination(pagination);
-    // 仅在首次加载时自动选中第一个项目，避免手动选择触发重新请求
-    if (isInitialLoadRef.current && list.length > 0 && !selectedIdRef.current) {
-      setSelectedId(list[0].id);
-      isInitialLoadRef.current = false;
-    } else {
-      setSelectedId(currentSelectedId => {
-        if (list.some(project => project.id === currentSelectedId)) {
-          return currentSelectedId;
-        }
-        return list[0]?.id || '';
-      });
-    }
-  }, []); // 移除 selectedId 依赖，由 selectedIdRef 提供最新值
-
-  // 保持 ref 指向最新的 loadProjects，避免 effect 依赖变化时重建定时器
-  const loadProjectsRef = useRef(loadProjects);
-  loadProjectsRef.current = loadProjects;
-
-  // selectedIdRef 与 selectedId 保持同步，供 loadProjects 闭包使用
-  useEffect(() => {
-    selectedIdRef.current = selectedId;
-  }, [selectedId]);
-
-  useEffect(() => {
-    loadProjectsRef.current(1).catch(err => setError(err.message));
-  }, []);
 
   useEffect(() => {
     try {
@@ -371,51 +316,11 @@ export default function AnalysisMasterPage() {
     } catch {}
   }, [draftProjects, user?.id]);
 
-  // SSE 订阅：分析任务完成/失败时立即更新状态
-  // 轮询仅作 SSE 断线兜底，降低频率避免页面抖动
+  // SSE 订阅：任务完成/失败时触发 SWR 重新验证，3秒轮询兜底
   useTaskEvents((data) => {
     if (data.type !== 'analysis') return;
-    const projectId = data.projectId;
-    if (!projectId) return;
-    if (data.status === 'success') {
-      const r = data.result;
-      setServerProjects(prev => prev.map(p =>
-        p.id === projectId
-          ? {
-              ...p,
-              name: r?.summary || p.name,
-              status: 'completed',
-              result: {
-                summary: r?.summary || '',
-                videoType: (r as Record<string, unknown>)?.videoType as string || '',
-                targetAudience: (r as Record<string, unknown>)?.targetAudience as string || '',
-                productDesc: (r as Record<string, unknown>)?.productDesc as string || '',
-                sellingPoints: (r as Record<string, unknown>)?.sellingPoints as unknown[] || [],
-                scenes: (r as Record<string, unknown>)?.scenes as unknown[] || [],
-                imagePrompt: r?.imagePrompt || '',
-                videoPrompt: r?.videoPrompt || '',
-                dialogue_vo_original: r?.dialogue_vo_original || '',
-                dialogue_vo_zh: r?.dialogue_vo_zh || '',
-                cta_a: r?.cta_a || '',
-                cta_b: r?.cta_b || '',
-                cta_c: r?.cta_c || '',
-                cta_d: r?.cta_d || '',
-                raw: (r as Record<string, unknown>)?.raw as Record<string, unknown> || {},
-              } as AnalysisResult,
-              error: undefined,
-            }
-          : p
-      ));
-      setAnalyzingId(prev => prev === projectId ? '' : prev);
-    } else if (data.status === 'failed') {
-      setServerProjects(prev => prev.map(p =>
-        p.id === projectId
-          ? { ...p, status: 'failed', error: data.error }
-          : p
-      ));
-      setAnalyzingId(prev => prev === projectId ? '' : prev);
-      setError(data.error || '分析失败');
-    }
+    // 触发 SWR 重新获取数据，实时反映最新项目状态
+    mutateProjects();
   });
 
   const createFromLink = async () => {
@@ -441,7 +346,6 @@ export default function AnalysisMasterPage() {
       ...prev.filter(item => item.clientRequestId !== clientRequestId),
     ]);
     setSelectedId(clientRequestId);
-    setProjectPagination(prev => ({ ...prev, page: 1 }));
     try {
       const response = await authFetch('/api/analysis-master/projects', {
         method: 'POST',
@@ -460,15 +364,9 @@ export default function AnalysisMasterPage() {
       setProjectName('');
       const createdProject = data.data as AnalysisProject;
       setDraftProjects(prev => prev.filter(item => item.clientRequestId !== clientRequestId));
-      setServerProjects(prev => [
-        createdProject,
-        ...prev.filter(item => item.id !== createdProject.id),
-      ]);
-      setProjectPagination(prev => ({ ...prev, total: prev.total + 1 }));
-      await loadProjects(1).catch(refreshErr => {
+      await mutateProjects().catch(refreshErr => {
         console.warn('[从链接导入] 列表刷新失败，但项目已创建:', refreshErr);
       });
-      setProjectPagination(prev => ({ ...prev, page: 1 }));
       setSelectedId(createdProject.id);
       console.log('[从链接导入] 成功, projectId=', data.data.id);
     } catch (err) {
@@ -556,8 +454,7 @@ export default function AnalysisMasterPage() {
       setUploadState({ phase: 'done' });
       setFile(null);
       setProjectName('');
-      await loadProjects(1);
-      setProjectPagination(prev => ({ ...prev, page: 1 }));
+      await mutateProjects();
       setSelectedId(projectId);
       setTimeout(() => setUploadState({ phase: 'idle' }), 2000);
     } catch (err) {
@@ -588,8 +485,7 @@ export default function AnalysisMasterPage() {
       if (!response.ok) throw new Error(data.error || '批量导入失败');
       setBatchSummary(data.data as BatchImportSummary);
       setBatchFile(null);
-      await loadProjects(1);
-      setProjectPagination(prev => ({ ...prev, page: 1 }));
+      await mutateProjects();
     } catch (err) {
       setError(err instanceof Error ? err.message : '批量导入失败');
     } finally {
@@ -647,10 +543,10 @@ export default function AnalysisMasterPage() {
       const response = await authFetch(`/api/analysis-master/analyze/${id}`, { method: 'POST' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '分析失败');
-      await loadProjects(projectPagination.page);
+      await mutateProjects();
     } catch (err) {
       setError(err instanceof Error ? err.message : '分析失败');
-      await loadProjects(projectPagination.page).catch(() => undefined);
+      await mutateProjects().catch(() => undefined);
     } finally {
       setAnalyzingId('');
     }
@@ -666,10 +562,10 @@ export default function AnalysisMasterPage() {
       const response = await authFetch(`/api/analysis-master/analyze/${id}`, { method: 'POST' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '分析失败');
-      await loadProjects(projectPagination.page);
+      await mutateProjects();
     } catch (err) {
       setError(err instanceof Error ? err.message : '分析失败');
-      await loadProjects(projectPagination.page).catch(() => undefined);
+      await mutateProjects().catch(() => undefined);
     } finally {
       setAnalyzingId('');
     }
@@ -697,7 +593,7 @@ export default function AnalysisMasterPage() {
         const data = await response.json();
         throw new Error(data.error || '删除失败');
       }
-      await loadProjects(projectPagination.page);
+      await mutateProjects();
     } catch (err) {
       alert(err instanceof Error ? err.message : '删除失败');
     } finally {
@@ -716,7 +612,7 @@ export default function AnalysisMasterPage() {
               <Badge variant="secondary">{displayedProjectCount || projects.length} 个项目</Badge>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => loadProjects(projectPagination.page).catch(err => setError(err.message))} disabled={loading}>
+              <Button variant="outline" size="sm" onClick={() => mutateProjects().catch(err => setError(err.message))} disabled={loading}>
                 <RefreshCw className="w-4 h-4 mr-1" />
                 刷新
               </Button>
@@ -913,7 +809,7 @@ export default function AnalysisMasterPage() {
                         size="sm"
                         onClick={() => {
                           if (projectPagination.page > 1) {
-                            loadProjects(projectPagination.page - 1).catch(err => setError(err.message));
+                            mutateProjects().catch(err => setError(err.message));
                           }
                         }}
                         disabled={projectPagination.page <= 1}
@@ -928,7 +824,7 @@ export default function AnalysisMasterPage() {
                         size="sm"
                         onClick={() => {
                           if (projectPagination.page < projectPagination.totalPages) {
-                            loadProjects(projectPagination.page + 1).catch(err => setError(err.message));
+                            mutateProjects().catch(err => setError(err.message));
                           }
                         }}
                         disabled={projectPagination.page >= projectPagination.totalPages}
