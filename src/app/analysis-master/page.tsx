@@ -720,10 +720,6 @@ export default function AnalysisMasterPage() {
               <Badge variant="secondary">{displayedProjectCount || projects.length} 个项目</Badge>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => exportProjects()} disabled={exporting}>
-                {exporting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />}
-                批量导出
-              </Button>
               <Button variant="outline" size="sm" onClick={() => loadProjects(projectPagination.page).catch(err => setError(err.message))} disabled={loading}>
                 <RefreshCw className="w-4 h-4 mr-1" />
                 刷新
@@ -844,8 +840,12 @@ export default function AnalysisMasterPage() {
               </Card>
 
               <Card className="shadow-sm">
-                <CardHeader>
+                <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle className="text-base">历史项目</CardTitle>
+                  <Button variant="outline" size="sm" onClick={() => exportProjects()} disabled={exporting}>
+                    {exporting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />}
+                    批量导出
+                  </Button>
                 </CardHeader>
                 <CardContent className="space-y-2">
                   {projects.length === 0 ? (
