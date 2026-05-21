@@ -10,6 +10,7 @@ import {
   createAnalysisBatchImportId,
   createAnalysisBatchTaskId,
   triggerBackgroundProcessing,
+  getRunningBatchImportTask,
 } from '@/lib/analysis-master-queue';
 
 export async function POST(request: NextRequest) {
@@ -17,6 +18,16 @@ export async function POST(request: NextRequest) {
     const auth = await authenticateRequest(request);
     if (!auth.success) {
       return unauthorizedResponse(auth.error, auth.status);
+    }
+
+    // 禁止并发：检测是否有正在执行的批量导入任务
+    const client = getSupabaseClient();
+    const runningTask = await getRunningBatchImportTask(client, auth.userId);
+    if (runningTask) {
+      return NextResponse.json(
+        { error: `已有批量导入任务在执行中（创建于 ${new Date(runningTask.created_at).toLocaleString('zh-CN')}），请等待完成后重试` },
+        { status: 409 }
+      );
     }
 
     const formData = await request.formData();
@@ -38,7 +49,6 @@ export async function POST(request: NextRequest) {
 
     const batchId = createAnalysisBatchImportId();
     const taskId = createAnalysisBatchTaskId(batchId);
-    const client = getSupabaseClient();
     const { error } = await client
       .from('task_queue')
       .insert({

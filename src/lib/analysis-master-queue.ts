@@ -38,6 +38,32 @@ export async function triggerBackgroundProcessing(taskId: string | null | undefi
   });
 }
 
+/**
+ * 检查用户是否有正在执行的批量导入任务
+ * @param client Supabase 客户端（由调用方传入以复用连接）
+ * @returns running 状态的任务信息，不存在则返回 null
+ */
+export async function getRunningBatchImportTask(
+  client: ReturnType<typeof getSupabaseClient>,
+  userId: string
+): Promise<{
+  id: string;
+  created_at: string;
+} | null> {
+  const { data, error } = await client
+    .from('task_queue')
+    .select('id, created_at')
+    .eq('user_id', userId)
+    .eq('type', 'analysis_batch_import')
+    .eq('status', 'running')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (error || !data) return null;
+  return { id: data.id, created_at: data.created_at };
+}
+
 export async function enqueueAnalysisTaskForProject(params: {
   projectId: string;
   userId: string;
