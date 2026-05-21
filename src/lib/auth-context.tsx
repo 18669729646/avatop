@@ -281,7 +281,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch (error) {
       // 忽略请求被取消的错误
-      if (error instanceof Error && error.name === 'AbortError') {
+      if (error instanceof Error && (error.name === 'AbortError' || error.message === 'Failed to fetch')) {
+        return;
+      }
+      // 网络瞬时抖动，静默忽略，下次路由切换会重试
+      if (error instanceof TypeError) {
         return;
       }
       console.error('Failed to refresh user:', error);
