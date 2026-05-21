@@ -5,8 +5,9 @@ import { isIP } from 'net';
 import { tmpdir } from 'os';
 import path from 'path';
 import { promisify } from 'util';
+import { getServerTikHubApiConfig } from '@/lib/server-config';
 
-export type VideoDownloadProvider = 'ssstik' | 'yt-dlp' | 'auto';
+export type VideoDownloadProvider = 'tikhub' | 'ssstik' | 'yt-dlp' | 'auto';
 
 export interface VideoDownloadOptions {
   provider?: VideoDownloadProvider;
@@ -36,6 +37,14 @@ interface YtDlpInfo {
   [key: string]: unknown;
 }
 
+interface TikHubDownloadInfo {
+  videoUrl: string;
+  title?: string;
+  duration?: number;
+  uploader?: string;
+  thumbnail?: string;
+}
+
 const execFileAsync = promisify(execFile);
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
@@ -44,7 +53,7 @@ const SSSTIK_BASE_URL = 'https://ssstik.io';
 
 function getConfiguredProvider(provider?: VideoDownloadProvider): VideoDownloadProvider {
   const configured = (provider || process.env.VIDEO_DOWNLOAD_PROVIDER || 'auto').toLowerCase();
-  if (configured === 'ssstik' || configured === 'yt-dlp' || configured === 'auto') {
+  if (configured === 'tikhub' || configured === 'ssstik' || configured === 'yt-dlp' || configured === 'auto') {
     return configured;
   }
   return 'auto';
@@ -57,6 +66,180 @@ function isTiktokLikeUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isDouyinUrl(url: string): boolean {
+  try {
+    return new URL(url).hostname.toLowerCase().includes('douyin.com');
+  } catch {
+    return false;
+  }
+}
+
+function getVideoDownloadAttemptPlan(url: string, provider: VideoDownloadProvider): Array<Exclude<VideoDownloadProvider, 'auto'>> {
+  if (provider === 'tikhub' || provider === 'ssstik' || provider === 'yt-dlp') {
+    return [provider];
+  }
+
+  if (isTiktokLikeUrl(url)) {
+    return ['tikhub', 'yt-dlp'];
+  }
+
+  return ['yt-dlp'];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function getNestedValue(source: unknown, pathParts: string[]): unknown {
+  let current: unknown = source;
+  for (const part of pathParts) {
+    if (Array.isArray(current)) {
+      const index = Number(part);
+      if (!Number.isInteger(index)) return undefined;
+      current = current[index];
+      continue;
+    }
+    if (!isRecord(current)) return undefined;
+    current = current[part];
+  }
+  return current;
+}
+
+function firstString(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = firstString(item);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+function getStringAt(source: unknown, paths: string[][]): string | undefined {
+  for (const pathParts of paths) {
+    const value = firstString(getNestedValue(source, pathParts));
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function getNumberAt(source: unknown, paths: string[][]): number | undefined {
+  for (const pathParts of paths) {
+    const value = getNestedValue(source, pathParts);
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return undefined;
+}
+
+function normalizeDurationSeconds(value?: number): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined;
+  return Math.round(value > 1000 ? value / 1000 : value);
+}
+
+function collectVideoUrlCandidates(value: unknown, candidates: string[] = []): string[] {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (
+      /^https?:\/\//i.test(trimmed) &&
+      (
+        /\.mp4(?:[?#].*)?$/i.test(trimmed) ||
+        trimmed.includes('/aweme/v1/play/') ||
+        trimmed.includes('/video/tos/')
+      )
+    ) {
+      candidates.push(trimmed);
+    }
+    return candidates;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectVideoUrlCandidates(item, candidates);
+    }
+    return candidates;
+  }
+
+  if (isRecord(value)) {
+    for (const [key, item] of Object.entries(value)) {
+      const lowerKey = key.toLowerCase();
+      if (lowerKey.includes('cover') || lowerKey.includes('avatar') || lowerKey.includes('music')) {
+        continue;
+      }
+      collectVideoUrlCandidates(item, candidates);
+    }
+  }
+
+  return candidates;
+}
+
+function extractTikHubDownloadInfo(payload: unknown): TikHubDownloadInfo {
+  const explicitVideoUrl = getStringAt(payload, [
+    ['data', 'aweme_detail', 'video', 'play_addr', 'url_list'],
+    ['data', 'aweme_detail', 'video', 'download_addr', 'url_list'],
+    ['data', 'aweme_detail', 'video', 'bit_rate', '0', 'play_addr', 'url_list'],
+    ['data', 'aweme_detail', 'video', 'playAddr', 'urlList'],
+    ['data', 'aweme_detail', 'video', 'downloadAddr', 'urlList'],
+    ['data', 'video', 'play_addr', 'url_list'],
+    ['data', 'video', 'download_addr', 'url_list'],
+    ['data', 'video', 'playAddr', 'urlList'],
+    ['data', 'video', 'downloadAddr', 'urlList'],
+    ['data', 'itemInfo', 'itemStruct', 'video', 'playAddr'],
+    ['data', 'itemInfo', 'itemStruct', 'video', 'downloadAddr'],
+  ]);
+
+  const videoUrl = explicitVideoUrl || collectVideoUrlCandidates(payload)[0];
+  if (!videoUrl) {
+    throw new Error('TikHub 响应中未找到可下载视频地址');
+  }
+
+  const title = getStringAt(payload, [
+    ['data', 'aweme_detail', 'desc'],
+    ['data', 'desc'],
+    ['data', 'itemInfo', 'itemStruct', 'desc'],
+    ['data', 'title'],
+  ]);
+  const uploader = getStringAt(payload, [
+    ['data', 'aweme_detail', 'author', 'nickname'],
+    ['data', 'author', 'nickname'],
+    ['data', 'itemInfo', 'itemStruct', 'author', 'nickname'],
+    ['data', 'author_name'],
+  ]);
+  const thumbnail = getStringAt(payload, [
+    ['data', 'aweme_detail', 'video', 'cover', 'url_list'],
+    ['data', 'aweme_detail', 'video', 'origin_cover', 'url_list'],
+    ['data', 'video', 'cover', 'url_list'],
+    ['data', 'itemInfo', 'itemStruct', 'video', 'cover'],
+  ]);
+  const duration = normalizeDurationSeconds(getNumberAt(payload, [
+    ['data', 'aweme_detail', 'duration'],
+    ['data', 'duration'],
+    ['data', 'itemInfo', 'itemStruct', 'video', 'duration'],
+    ['data', 'video', 'duration'],
+  ]));
+
+  return {
+    videoUrl,
+    title,
+    duration,
+    uploader,
+    thumbnail,
+  };
+}
+
+function getTikHubApiUrl(url: string, baseUrl: string): string {
+  const endpoint = isDouyinUrl(url)
+    ? '/api/v1/douyin/app/v3/fetch_one_video_by_share_url'
+    : '/api/v1/tiktok/app/v3/fetch_one_video_by_share_url';
+  const apiUrl = new URL(endpoint, baseUrl);
+  apiUrl.searchParams.set('share_url', url);
+  return apiUrl.toString();
 }
 
 function decodeHtmlEntities(value: string): string {
@@ -244,8 +427,18 @@ async function fetchText(url: string, timeoutMs: number, init?: RequestInit): Pr
   }
 }
 
-async function downloadUrlToBuffer(url: string, timeoutMs: number, maxBytes: number): Promise<{ buffer: Buffer; contentType: string; fileName: string }> {
-  await assertPublicHttpUrl(url);
+function buildVideoDownloadHeaders(options: { referer?: string } = {}): Record<string, string> {
+  const headers: Record<string, string> = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'Accept': 'video/mp4,video/*,*/*',
+  };
+  if (options.referer) {
+    headers.Referer = options.referer;
+  }
+  return headers;
+}
+
+async function fetchTikHubJson(url: string, apiKey: string, timeoutMs: number): Promise<unknown> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -253,10 +446,35 @@ async function downloadUrlToBuffer(url: string, timeoutMs: number, maxBytes: num
     const response = await fetch(url, {
       signal: controller.signal,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'video/mp4,video/*,*/*',
-        'Referer': SSSTIK_BASE_URL,
+        'Authorization': `Bearer ${apiKey}`,
+        'Accept': 'application/json',
       },
+    });
+
+    if (!response.ok) {
+      throw new Error(`请求 TikHub 失败: ${response.status}`);
+    }
+
+    return response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function downloadUrlToBuffer(
+  url: string,
+  timeoutMs: number,
+  maxBytes: number,
+  options: { referer?: string } = {}
+): Promise<{ buffer: Buffer; contentType: string; fileName: string }> {
+  await assertPublicHttpUrl(url);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: buildVideoDownloadHeaders(options),
     });
 
     if (!response.ok) {
@@ -308,6 +526,34 @@ async function downloadUrlToBuffer(url: string, timeoutMs: number, maxBytes: num
   }
 }
 
+async function downloadWithTikHub(url: string, timeoutMs: number, maxBytes: number): Promise<VideoDownloadResult> {
+  console.log(`[VideoDownloader] [tikhub] 开始解析，url=${url}, timeout=${timeoutMs}ms`);
+  if (!isTiktokLikeUrl(url)) {
+    throw new Error('TikHub 当前仅用于 TikTok/抖音类链接');
+  }
+
+  const apiConfig = await getServerTikHubApiConfig();
+  if (!apiConfig?.apiKey) {
+    throw new Error('TikHub API Key 未配置');
+  }
+
+  const apiUrl = getTikHubApiUrl(url, apiConfig.baseUrl);
+  const payload = await fetchTikHubJson(apiUrl, apiConfig.apiKey, Math.min(timeoutMs, 60 * 1000));
+  const info = extractTikHubDownloadInfo(payload);
+  console.log(`[VideoDownloader] [tikhub] 提取到视频地址，size=${info.videoUrl.length}`);
+
+  const downloaded = await downloadUrlToBuffer(info.videoUrl, timeoutMs, maxBytes);
+  console.log(`[VideoDownloader] [tikhub] 下载完成，bufferSize=${downloaded.buffer.length}`);
+  return {
+    ...downloaded,
+    title: info.title,
+    duration: info.duration,
+    uploader: info.uploader,
+    thumbnail: info.thumbnail,
+    provider: 'tikhub',
+  };
+}
+
 async function downloadWithSsstik(url: string, timeoutMs: number, maxBytes: number): Promise<VideoDownloadResult> {
   console.log(`[VideoDownloader] [ssstik] 开始下载，url=${url}, timeout=${timeoutMs}ms`);
   if (!isTiktokLikeUrl(url)) {
@@ -348,7 +594,7 @@ async function downloadWithSsstik(url: string, timeoutMs: number, maxBytes: numb
       }
 
       console.log(`[VideoDownloader] [ssstik] 提取到视频地址，size=${videoUrl.length}`);
-      const downloaded = await downloadUrlToBuffer(videoUrl, timeoutMs, maxBytes);
+      const downloaded = await downloadUrlToBuffer(videoUrl, timeoutMs, maxBytes, { referer: SSSTIK_BASE_URL });
       console.log(`[VideoDownloader] [ssstik] 下载完成，bufferSize=${downloaded.buffer.length}`);
       return {
         ...downloaded,
@@ -432,36 +678,36 @@ export async function downloadVideoFromUrl(url: string, options: VideoDownloadOp
     const provider = getConfiguredProvider(options.provider);
     const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
     const maxBytes = options.maxBytes || DEFAULT_MAX_BYTES;
+    const plan = getVideoDownloadAttemptPlan(url, provider);
+    let lastError: Error | null = null;
 
-    if (provider === 'ssstik') {
-      const result = await downloadWithSsstik(url, timeoutMs, maxBytes);
-      console.log(`[VideoDownloader] <<< downloadVideoFromUrl 完成，provider=ssstik, size=${result.buffer.length}`);
-      return result;
-    }
-
-    if (provider === 'yt-dlp') {
-      const result = await downloadWithYtDlp(url, options);
-      console.log(`[VideoDownloader] <<< downloadVideoFromUrl 完成，provider=yt-dlp, size=${result.buffer.length}`);
-      return result;
-    }
-
-    if (isTiktokLikeUrl(url)) {
+    for (const currentProvider of plan) {
       try {
-        console.log(`[VideoDownloader] [auto] 优先尝试 ssstik`);
-        const result = await downloadWithSsstik(url, timeoutMs, maxBytes);
-        console.log(`[VideoDownloader] <<< downloadVideoFromUrl 完成，provider=ssstik, size=${result.buffer.length}`);
+        let result: VideoDownloadResult;
+        if (currentProvider === 'tikhub') {
+          result = await downloadWithTikHub(url, timeoutMs, maxBytes);
+        } else if (currentProvider === 'ssstik') {
+          result = await downloadWithSsstik(url, timeoutMs, maxBytes);
+        } else {
+          result = await downloadWithYtDlp(url, options);
+        }
+        console.log(`[VideoDownloader] <<< downloadVideoFromUrl 完成，provider=${currentProvider}, size=${result.buffer.length}`);
         return result;
-      } catch (ssstikError) {
-        console.warn(`[VideoDownloader] [auto] ssstik 失败，降级 yt-dlp: ${(ssstikError as Error).message}`);
+      } catch (providerError) {
+        lastError = providerError as Error;
+        const hasFallback = plan.indexOf(currentProvider) < plan.length - 1;
+        if (!hasFallback) break;
+        console.warn(`[VideoDownloader] [auto] ${currentProvider} 失败，降级 ${plan[plan.indexOf(currentProvider) + 1]}: ${lastError.message}`);
       }
     }
 
-    console.log(`[VideoDownloader] [auto] 使用 yt-dlp 下载`);
-    const result = await downloadWithYtDlp(url, options);
-    console.log(`[VideoDownloader] <<< downloadVideoFromUrl 完成，provider=yt-dlp, size=${result.buffer.length}`);
-    return result;
+    throw lastError || new Error('视频下载失败');
   } catch (error) {
     console.error(`[VideoDownloader] <<< downloadVideoFromUrl 失败，url=${url}: ${(error as Error).message}`);
     throw error;
   }
 }
+
+export const getVideoDownloadAttemptPlanForTest = getVideoDownloadAttemptPlan;
+export const extractTikHubDownloadInfoForTest = extractTikHubDownloadInfo;
+export const buildVideoDownloadHeadersForTest = buildVideoDownloadHeaders;

@@ -44,13 +44,20 @@ export interface VideoApiConfig extends ApiConfig {
 }
 
 // 系统配置
+export interface DownloadApiConfig extends ApiConfig {
+  type: 'download';
+  provider: 'tikhub' | string;
+}
+
 export interface SystemConfig {
   textApis: TextApiConfig[];
   imageApis: ImageApiConfig[];
   videoApis: VideoApiConfig[];
+  downloadApis?: DownloadApiConfig[];
   defaultTextApiId: string;
   defaultImageApiId: string;
   defaultVideoApiId: string;
+  defaultDownloadApiId?: string;
 }
 
 // 支持的图片生成模型列表（统一管理）
@@ -159,9 +166,11 @@ const DEFAULT_CONFIGS: SystemConfig = {
   textApis: [],
   imageApis: [],
   videoApis: [],
+  downloadApis: [],
   defaultTextApiId: '',
   defaultImageApiId: '',
   defaultVideoApiId: '',
+  defaultDownloadApiId: '',
 };
 
 // 获取系统配置
@@ -460,6 +469,22 @@ export async function addVideoApiConfigAsync(config: Omit<VideoApiConfig, 'id' |
   return newConfig;
 }
 
+export async function addDownloadApiConfigAsync(config: Omit<DownloadApiConfig, 'id' | 'createdAt' | 'updatedAt'>): Promise<DownloadApiConfig> {
+  const systemConfig = await getSystemConfigAsync();
+  const newConfig: DownloadApiConfig = {
+    ...config,
+    id: `download-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  systemConfig.downloadApis = [...(systemConfig.downloadApis || []), newConfig];
+  if (config.isDefault || !systemConfig.defaultDownloadApiId) {
+    systemConfig.defaultDownloadApiId = newConfig.id;
+  }
+  await saveSystemConfigAsync(systemConfig);
+  return newConfig;
+}
+
 // 异步版本 - 更新文本API配置
 export async function updateTextApiConfigAsync(id: string, updates: Partial<TextApiConfig>): Promise<boolean> {
   const systemConfig = await getSystemConfigAsync();
@@ -514,6 +539,25 @@ export async function updateVideoApiConfigAsync(id: string, updates: Partial<Vid
   return false;
 }
 
+export async function updateDownloadApiConfigAsync(id: string, updates: Partial<DownloadApiConfig>): Promise<boolean> {
+  const systemConfig = await getSystemConfigAsync();
+  const downloadApis = systemConfig.downloadApis || [];
+  const index = downloadApis.findIndex(api => api.id === id);
+  if (index !== -1) {
+    downloadApis[index] = {
+      ...downloadApis[index],
+      ...updates,
+      updatedAt: Date.now(),
+    };
+    systemConfig.downloadApis = downloadApis;
+    if (updates.isDefault) {
+      systemConfig.defaultDownloadApiId = id;
+    }
+    return saveSystemConfigAsync(systemConfig);
+  }
+  return false;
+}
+
 // 异步版本 - 删除文本API配置
 export async function deleteTextApiConfigAsync(id: string): Promise<boolean> {
   const systemConfig = await getSystemConfigAsync();
@@ -544,6 +588,15 @@ export async function deleteVideoApiConfigAsync(id: string): Promise<boolean> {
   return saveSystemConfigAsync(systemConfig);
 }
 
+export async function deleteDownloadApiConfigAsync(id: string): Promise<boolean> {
+  const systemConfig = await getSystemConfigAsync();
+  systemConfig.downloadApis = (systemConfig.downloadApis || []).filter(api => api.id !== id);
+  if (systemConfig.defaultDownloadApiId === id && systemConfig.downloadApis.length > 0) {
+    systemConfig.defaultDownloadApiId = systemConfig.downloadApis[0].id;
+  }
+  return saveSystemConfigAsync(systemConfig);
+}
+
 // 异步版本 - 设置默认API
 export async function setDefaultApiAsync(type: 'text' | 'image' | 'video', id: string): Promise<boolean> {
   const systemConfig = await getSystemConfigAsync();
@@ -554,6 +607,12 @@ export async function setDefaultApiAsync(type: 'text' | 'image' | 'video', id: s
   } else if (type === 'video') {
     systemConfig.defaultVideoApiId = id;
   }
+  return saveSystemConfigAsync(systemConfig);
+}
+
+export async function setDefaultDownloadApiAsync(id: string): Promise<boolean> {
+  const systemConfig = await getSystemConfigAsync();
+  systemConfig.defaultDownloadApiId = id;
   return saveSystemConfigAsync(systemConfig);
 }
 

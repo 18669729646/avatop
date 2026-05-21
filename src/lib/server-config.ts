@@ -10,16 +10,24 @@
  */
 
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import type { TextApiConfig, ImageApiConfig, VideoApiConfig } from './system-config';
+import type { TextApiConfig, ImageApiConfig, VideoApiConfig, DownloadApiConfig } from './system-config';
+
+export interface ServerDownloadApiConfig {
+  apiKey: string;
+  baseUrl: string;
+  provider: 'tikhub' | string;
+}
 
 // 从环境变量解析默认配置
 function parseDefaultConfigsFromEnv(): {
   textApis: TextApiConfig[];
   imageApis: ImageApiConfig[];
   videoApis: VideoApiConfig[];
+  downloadApis: DownloadApiConfig[];
   defaultTextApiId: string;
   defaultImageApiId: string;
   defaultVideoApiId: string;
+  defaultDownloadApiId: string;
 } | null {
   // 检查环境变量是否存在
   const envConfig = process.env.DEFAULT_API_CONFIGS;
@@ -40,9 +48,11 @@ function parseDefaultConfigsFromEnv(): {
       textApis: parsed.textApis as TextApiConfig[],
       imageApis: parsed.imageApis as ImageApiConfig[],
       videoApis: parsed.videoApis as VideoApiConfig[],
+      downloadApis: (parsed.downloadApis || []) as DownloadApiConfig[],
       defaultTextApiId: parsed.defaultTextApiId || parsed.textApis[0].id,
       defaultImageApiId: parsed.defaultImageApiId || parsed.imageApis[0].id,
       defaultVideoApiId: parsed.defaultVideoApiId || parsed.videoApis[0].id,
+      defaultDownloadApiId: parsed.defaultDownloadApiId || parsed.downloadApis?.[0]?.id || '',
     };
   } catch (error) {
     console.error('[ServerConfig] 解析环境变量 DEFAULT_API_CONFIGS 失败:', error);
@@ -55,9 +65,11 @@ function getEmptyConfigs(): {
   textApis: TextApiConfig[];
   imageApis: ImageApiConfig[];
   videoApis: VideoApiConfig[];
+  downloadApis: DownloadApiConfig[];
   defaultTextApiId: string;
   defaultImageApiId: string;
   defaultVideoApiId: string;
+  defaultDownloadApiId: string;
 } {
   const now = Date.now();
   return {
@@ -97,9 +109,55 @@ function getEmptyConfigs(): {
       createdAt: now,
       updatedAt: now,
     }],
+    downloadApis: [],
     defaultTextApiId: 'default-text-api',
     defaultImageApiId: 'default-image-api',
     defaultVideoApiId: 'default-video-api',
+    defaultDownloadApiId: '',
+  };
+}
+
+function isMaskedKey(key: string | undefined): boolean {
+  return !!key && key.includes('****');
+}
+
+function getTikHubEnvConfig(): ServerDownloadApiConfig | null {
+  const apiKey = process.env.TIKHUB_API_KEY;
+  if (!apiKey || isMaskedKey(apiKey)) return null;
+  return {
+    apiKey,
+    baseUrl: process.env.TIKHUB_BASE_URL || 'https://api.tikhub.io',
+    provider: 'tikhub',
+  };
+}
+
+function selectTikHubApiConfig(
+  downloadApis: DownloadApiConfig[] | undefined,
+  defaultDownloadApiId: string | undefined,
+  envConfig: ServerDownloadApiConfig | null = getTikHubEnvConfig()
+): ServerDownloadApiConfig | null {
+  const candidates = (downloadApis || []).filter(api => api.provider?.trim().toLowerCase() === 'tikhub' || api.id === 'download-tikhub');
+  const selected = candidates.find(api => api.id === defaultDownloadApiId) || candidates[0];
+  if (selected?.apiKey && !isMaskedKey(selected.apiKey)) {
+    return {
+      apiKey: selected.apiKey,
+      baseUrl: selected.baseUrl || 'https://api.tikhub.io',
+      provider: 'tikhub',
+    };
+  }
+  return envConfig ? { ...envConfig, provider: 'tikhub' } : null;
+}
+
+function mergeServerDownloadApis(
+  dbDownloadApis: DownloadApiConfig[],
+  dbDefaultDownloadApiId: string | undefined,
+  envDownloadApis: DownloadApiConfig[] = [],
+  envDefaultDownloadApiId = ''
+): { downloadApis: DownloadApiConfig[]; defaultDownloadApiId: string } {
+  const downloadApis = dbDownloadApis.length > 0 ? dbDownloadApis : envDownloadApis;
+  return {
+    downloadApis,
+    defaultDownloadApiId: dbDefaultDownloadApiId || envDefaultDownloadApiId || downloadApis[0]?.id || '',
   };
 }
 
@@ -111,9 +169,11 @@ export async function getServerApiConfig(): Promise<{
   textApis: TextApiConfig[];
   imageApis: ImageApiConfig[];
   videoApis: VideoApiConfig[];
+  downloadApis: DownloadApiConfig[];
   defaultTextApiId: string;
   defaultImageApiId: string;
   defaultVideoApiId: string;
+  defaultDownloadApiId: string;
 }> {
   const client = getSupabaseClient();
   
@@ -142,7 +202,7 @@ export async function getServerApiConfig(): Promise<{
     }
     
     // 解析配置（支持数组格式或 { items: [...] } 格式）
-    const parseApis = (apis: unknown, type: 'text' | 'image' | 'video'): ImageApiConfig[] | TextApiConfig[] | VideoApiConfig[] => {
+    const parseApis = (apis: unknown, type: 'text' | 'image' | 'video' | 'download'): ImageApiConfig[] | TextApiConfig[] | VideoApiConfig[] | DownloadApiConfig[] => {
       let items: unknown[] = [];
       
       if (Array.isArray(apis)) {
@@ -167,22 +227,33 @@ export async function getServerApiConfig(): Promise<{
     const videoApis = parseApis(config.videoApis, 'video') as VideoApiConfig[];
     
     // 从 defaults 配置中获取默认 ID
-    const defaults = config.defaults as { defaultTextApiId?: string; defaultImageApiId?: string; defaultVideoApiId?: string } | undefined;
+    const downloadApis = parseApis(config.downloadApis, 'download') as DownloadApiConfig[];
+
+    const defaults = config.defaults as { defaultTextApiId?: string; defaultImageApiId?: string; defaultVideoApiId?: string; defaultDownloadApiId?: string } | undefined;
     const defaultTextApiId = defaults?.defaultTextApiId;
     const defaultImageApiId = defaults?.defaultImageApiId;
     const defaultVideoApiId = defaults?.defaultVideoApiId;
+    const defaultDownloadApiId = defaults?.defaultDownloadApiId;
+    const envConfigs = parseDefaultConfigsFromEnv();
+    const mergedDownload = mergeServerDownloadApis(
+      downloadApis,
+      defaultDownloadApiId,
+      envConfigs?.downloadApis || [],
+      envConfigs?.defaultDownloadApiId || ''
+    );
     
     // 如果数据库配置不完整，尝试合并环境变量配置
     if (textApis.length === 0 || imageApis.length === 0 || videoApis.length === 0) {
-      const envConfigs = parseDefaultConfigsFromEnv();
       if (envConfigs) {
         return {
           textApis: textApis.length > 0 ? textApis : envConfigs.textApis,
           imageApis: imageApis.length > 0 ? imageApis : envConfigs.imageApis,
           videoApis: videoApis.length > 0 ? videoApis : envConfigs.videoApis,
+          downloadApis: mergedDownload.downloadApis,
           defaultTextApiId: defaultTextApiId || envConfigs.defaultTextApiId,
           defaultImageApiId: defaultImageApiId || envConfigs.defaultImageApiId,
           defaultVideoApiId: defaultVideoApiId || envConfigs.defaultVideoApiId,
+          defaultDownloadApiId: mergedDownload.defaultDownloadApiId,
         };
       }
     }
@@ -191,9 +262,11 @@ export async function getServerApiConfig(): Promise<{
       textApis: textApis.length > 0 ? textApis : getEmptyConfigs().textApis,
       imageApis: imageApis.length > 0 ? imageApis : getEmptyConfigs().imageApis,
       videoApis: videoApis.length > 0 ? videoApis : getEmptyConfigs().videoApis,
+      downloadApis: mergedDownload.downloadApis,
       defaultTextApiId: defaultTextApiId || getEmptyConfigs().defaultTextApiId,
       defaultImageApiId: defaultImageApiId || getEmptyConfigs().defaultImageApiId,
       defaultVideoApiId: defaultVideoApiId || getEmptyConfigs().defaultVideoApiId,
+      defaultDownloadApiId: mergedDownload.defaultDownloadApiId,
     };
   } catch (error) {
     console.error('[ServerConfig] getServerApiConfig 失败:', error);
@@ -226,6 +299,11 @@ export async function getServerDefaultTextApi(): Promise<TextApiConfig | null> {
   const config = await getServerApiConfig();
   const defaultApi = config.textApis.find(api => api.id === config.defaultTextApiId);
   return defaultApi || config.textApis[0] || null;
+}
+
+export async function getServerTikHubApiConfig(): Promise<ServerDownloadApiConfig | null> {
+  const config = await getServerApiConfig();
+  return selectTikHubApiConfig(config.downloadApis, config.defaultDownloadApiId);
 }
 
 /**
@@ -328,11 +406,16 @@ export async function checkApiConfigured(): Promise<{
   text: boolean;
   image: boolean;
   video: boolean;
+  download: boolean;
 }> {
   const config = await getServerApiConfig();
   return {
     text: config.textApis.some(api => api.apiKey && api.apiKey.length > 0),
     image: config.imageApis.some(api => api.apiKey && api.apiKey.length > 0),
     video: config.videoApis.some(api => api.apiKey && api.apiKey.length > 0),
+    download: !!selectTikHubApiConfig(config.downloadApis, config.defaultDownloadApiId),
   };
 }
+
+export const selectTikHubApiConfigForTest = selectTikHubApiConfig;
+export const mergeServerDownloadApisForTest = mergeServerDownloadApis;

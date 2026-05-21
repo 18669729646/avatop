@@ -29,6 +29,7 @@ import {
   MessageSquare,
   Image,
   Video,
+  Download,
   Cpu,
   AlertTriangle,
   Save,
@@ -40,16 +41,21 @@ import {
   addTextApiConfigAsync,
   addImageApiConfigAsync,
   addVideoApiConfigAsync,
+  addDownloadApiConfigAsync,
   updateTextApiConfigAsync,
   updateImageApiConfigAsync,
   updateVideoApiConfigAsync,
+  updateDownloadApiConfigAsync,
   deleteTextApiConfigAsync,
   deleteImageApiConfigAsync,
   deleteVideoApiConfigAsync,
+  deleteDownloadApiConfigAsync,
   setDefaultApiAsync,
+  setDefaultDownloadApiAsync,
   TextApiConfig,
   ImageApiConfig,
   VideoApiConfig,
+  DownloadApiConfig,
   SystemConfig,
   VIDEO_MODELS,
   IMAGE_MODELS,
@@ -110,7 +116,7 @@ export default function ModelSettingsPage() {
   };
 
   // 开始编辑
-  const startEdit = (api: TextApiConfig | ImageApiConfig | VideoApiConfig) => {
+  const startEdit = (api: TextApiConfig | ImageApiConfig | VideoApiConfig | DownloadApiConfig) => {
     setEditingId(api.id);
     const isCustomVideo = api.type === 'video' && api.model && !VIDEO_MODELS.includes(api.model as any);
     const isCustomImage = api.type === 'image' && api.model && !IMAGE_MODELS.includes(api.model as any);
@@ -121,6 +127,7 @@ export default function ModelSettingsPage() {
       apiKeyMasked: api.apiKeyMasked || '', // 显示脱敏后的 Key
       baseUrl: api.baseUrl,
       model: api.model || '',
+      provider: 'provider' in api ? api.provider : '',
       defaultAspectRatio: (api as ImageApiConfig | VideoApiConfig).defaultAspectRatio || '',
       defaultResolution: (api as ImageApiConfig | VideoApiConfig).defaultResolution || '',
       seedanceDefaultDuration: String((api as VideoApiConfig).seedanceDefaultDuration || 5),
@@ -140,7 +147,7 @@ export default function ModelSettingsPage() {
   };
 
   // 保存编辑
-  const saveEdit = async (type: 'text' | 'image' | 'video', id: string) => {
+  const saveEdit = async (type: 'text' | 'image' | 'video' | 'download', id: string) => {
     setSaving(true);
     setError('');
     try {
@@ -172,6 +179,12 @@ export default function ModelSettingsPage() {
           seedanceDefaultWatermark: editForm.seedanceDefaultWatermark === 'true',
           seedanceDefaultRealPersonMode: editForm.seedanceDefaultRealPersonMode === 'true',
         });
+      } else if (type === 'download') {
+        success = await updateDownloadApiConfigAsync(id, {
+          ...updates,
+          type: 'download',
+          provider: editForm.provider || 'tikhub',
+        });
       }
 
       if (success) {
@@ -191,16 +204,17 @@ export default function ModelSettingsPage() {
   };
 
   // 新增配置
-  const handleAdd = async (type: 'text' | 'image' | 'video') => {
+  const handleAdd = async (type: 'text' | 'image' | 'video' | 'download') => {
     setSaving(true);
     setError('');
     try {
       const newApi = {
         name: '新配置',
         apiKey: '',
-        baseUrl: 'https://yunwu.ai',
+        baseUrl: type === 'download' ? 'https://api.tikhub.io' : 'https://yunwu.ai',
         model: type === 'text' ? 'gemini-3.1-pro-preview' : 
-               type === 'image' ? 'gemini-3-pro-image-preview' : 'veo_3_1-fast',
+               type === 'image' ? 'gemini-3-pro-image-preview' :
+               type === 'download' ? '' : 'veo_3_1-fast',
         isDefault: false,
       };
 
@@ -223,6 +237,13 @@ export default function ModelSettingsPage() {
           seedanceDefaultWatermark: false,
           seedanceDefaultRealPersonMode: false,
         });
+      } else if (type === 'download') {
+        await addDownloadApiConfigAsync({
+          ...newApi,
+          name: 'TikHub',
+          type: 'download',
+          provider: 'tikhub',
+        });
       }
 
       await loadConfig();
@@ -236,7 +257,7 @@ export default function ModelSettingsPage() {
   };
 
   // 删除配置
-  const handleDelete = async (type: 'text' | 'image' | 'video', id: string) => {
+  const handleDelete = async (type: 'text' | 'image' | 'video' | 'download', id: string) => {
     if (!confirm('确定要删除此配置吗？')) return;
     
     setSaving(true);
@@ -248,6 +269,8 @@ export default function ModelSettingsPage() {
         await deleteImageApiConfigAsync(id);
       } else if (type === 'video') {
         await deleteVideoApiConfigAsync(id);
+      } else if (type === 'download') {
+        await deleteDownloadApiConfigAsync(id);
       }
       await loadConfig();
       setSuccess('配置已删除');
@@ -260,11 +283,15 @@ export default function ModelSettingsPage() {
   };
 
   // 设为默认
-  const handleSetDefault = async (type: 'text' | 'image' | 'video', id: string) => {
+  const handleSetDefault = async (type: 'text' | 'image' | 'video' | 'download', id: string) => {
     setSaving(true);
     setError('');
     try {
-      await setDefaultApiAsync(type, id);
+      if (type === 'download') {
+        await setDefaultDownloadApiAsync(id);
+      } else {
+        await setDefaultApiAsync(type, id);
+      }
       await loadConfig();
       setSuccess('已设为默认');
       setTimeout(() => setSuccess(''), 3000);
@@ -277,8 +304,8 @@ export default function ModelSettingsPage() {
 
   // 渲染API配置项
   const renderApiItem = (
-    api: TextApiConfig | ImageApiConfig | VideoApiConfig,
-    type: 'text' | 'image' | 'video',
+    api: TextApiConfig | ImageApiConfig | VideoApiConfig | DownloadApiConfig,
+    type: 'text' | 'image' | 'video' | 'download',
     defaultId: string
   ) => {
     const isEditing = editingId === api.id;
@@ -296,7 +323,7 @@ export default function ModelSettingsPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>模型</Label>
+              <Label>{type === 'download' ? '服务商' : '模型'}</Label>
               {type === 'video' ? (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
@@ -386,6 +413,18 @@ export default function ModelSettingsPage() {
                     </Select>
                   )}
                 </div>
+              ) : type === 'download' ? (
+                <Select
+                  value={editForm.provider || 'tikhub'}
+                  onValueChange={(v) => setEditForm({ ...editForm, provider: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择服务商" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="tikhub">TikHub</SelectItem>
+                  </SelectContent>
+                </Select>
               ) : (
                 <Input
                   value={editForm.model || ''}
@@ -558,8 +597,10 @@ export default function ModelSettingsPage() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            {api.model && (
-              <span className="text-sm text-muted-foreground truncate max-w-[150px]">{api.model}</span>
+            {(api.model || ('provider' in api && api.provider)) && (
+              <span className="text-sm text-muted-foreground truncate max-w-[150px]">
+                {'provider' in api ? api.provider : api.model}
+              </span>
             )}
             {!isDefault && (
               <Button
@@ -681,7 +722,7 @@ export default function ModelSettingsPage() {
           </CardHeader>
           <CardContent>
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full grid-cols-3 mb-4">
+              <TabsList className="grid w-full grid-cols-4 mb-4">
                 <TabsTrigger value="text" className="flex items-center gap-2">
                   <MessageSquare className="w-4 h-4" />
                   文本生成
@@ -693,6 +734,10 @@ export default function ModelSettingsPage() {
                 <TabsTrigger value="video" className="flex items-center gap-2">
                   <Video className="w-4 h-4" />
                   视频生成
+                </TabsTrigger>
+                <TabsTrigger value="download" className="flex items-center gap-2">
+                  <Download className="w-4 h-4" />
+                  下载解析
                 </TabsTrigger>
               </TabsList>
 
@@ -727,6 +772,15 @@ export default function ModelSettingsPage() {
                   </Button>
                 </div>
                 {config.videoApis.map(api => renderApiItem(api, 'video', config.defaultVideoApiId))}
+              </TabsContent>
+              <TabsContent value="download" className="space-y-4">
+                <div className="flex justify-end">
+                  <Button onClick={() => handleAdd('download')} disabled={saving || loading}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    新增配置
+                  </Button>
+                </div>
+                {(config.downloadApis || []).map(api => renderApiItem(api, 'download', config.defaultDownloadApiId || ''))}
               </TabsContent>
             </Tabs>
           </CardContent>

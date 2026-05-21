@@ -19,9 +19,11 @@ function parseDefaultConfigsFromEnv(): {
   textApis: Array<{ id: string; name: string; type: string; apiKey: string; baseUrl: string; model?: string; isDefault?: boolean; defaultAspectRatio?: string; defaultResolution?: string }>;
   imageApis: Array<{ id: string; name: string; type: string; apiKey: string; baseUrl: string; model?: string; isDefault?: boolean; defaultAspectRatio?: string; defaultResolution?: string }>;
   videoApis: Array<{ id: string; name: string; type: string; apiKey: string; baseUrl: string; model?: string; isDefault?: boolean; defaultAspectRatio?: string; defaultResolution?: string }>;
+  downloadApis?: Array<{ id: string; name: string; type: string; provider: string; apiKey: string; baseUrl: string; model?: string; isDefault?: boolean }>;
   defaultTextApiId: string;
   defaultImageApiId: string;
   defaultVideoApiId: string;
+  defaultDownloadApiId?: string;
 } | null {
   const envConfig = process.env.DEFAULT_API_CONFIGS;
   if (!envConfig) {
@@ -39,9 +41,11 @@ function parseDefaultConfigsFromEnv(): {
       textApis: parsed.textApis,
       imageApis: parsed.imageApis,
       videoApis: parsed.videoApis,
+      downloadApis: parsed.downloadApis || [],
       defaultTextApiId: parsed.defaultTextApiId || parsed.textApis[0].id,
       defaultImageApiId: parsed.defaultImageApiId || parsed.imageApis[0].id,
       defaultVideoApiId: parsed.defaultVideoApiId || parsed.videoApis[0].id,
+      defaultDownloadApiId: parsed.defaultDownloadApiId || parsed.downloadApis?.[0]?.id || '',
     };
   } catch (error) {
     console.error('[System Config API] 解析环境变量失败:', error);
@@ -89,9 +93,11 @@ function getEmptyConfigs() {
       createdAt: now,
       updatedAt: now,
     }],
+    downloadApis: [],
     defaultTextApiId: 'default-text-api',
     defaultImageApiId: 'default-image-api',
     defaultVideoApiId: 'default-video-api',
+    defaultDownloadApiId: '',
   };
 }
 
@@ -123,9 +129,11 @@ export async function GET() {
             textApis: maskApiConfigs(envConfigs.textApis),
             imageApis: maskApiConfigs(envConfigs.imageApis),
             videoApis: maskApiConfigs(envConfigs.videoApis),
+            downloadApis: maskApiConfigs(envConfigs.downloadApis || []),
             defaultTextApiId: envConfigs.defaultTextApiId,
             defaultImageApiId: envConfigs.defaultImageApiId,
             defaultVideoApiId: envConfigs.defaultVideoApiId,
+            defaultDownloadApiId: envConfigs.defaultDownloadApiId || '',
           }
         });
       }
@@ -141,9 +149,11 @@ export async function GET() {
             textApis: maskApiConfigs(envConfigs.textApis),
             imageApis: maskApiConfigs(envConfigs.imageApis),
             videoApis: maskApiConfigs(envConfigs.videoApis),
+            downloadApis: maskApiConfigs(envConfigs.downloadApis || []),
             defaultTextApiId: envConfigs.defaultTextApiId,
             defaultImageApiId: envConfigs.defaultImageApiId,
             defaultVideoApiId: envConfigs.defaultVideoApiId,
+            defaultDownloadApiId: envConfigs.defaultDownloadApiId || '',
           }
         });
       }
@@ -182,12 +192,16 @@ export async function GET() {
     const videoApis = extractApis<{ apiKey?: string }>(config.videoApis).length
       ? extractApis<{ apiKey?: string }>(config.videoApis)
       : (envConfigs?.videoApis || getEmptyConfigs().videoApis);
+    const downloadApis = extractApis<{ apiKey?: string }>(config.downloadApis).length
+      ? extractApis<{ apiKey?: string }>(config.downloadApis)
+      : (envConfigs?.downloadApis || getEmptyConfigs().downloadApis);
     
     // 从 defaults 配置中获取默认 ID
     const defaults = config.defaults as { 
       defaultTextApiId?: string; 
       defaultImageApiId?: string; 
-      defaultVideoApiId?: string 
+      defaultVideoApiId?: string;
+      defaultDownloadApiId?: string;
     } | undefined;
     
     // 返回脱敏后的配置
@@ -195,9 +209,11 @@ export async function GET() {
       textApis: maskApiConfigs(textApis),
       imageApis: maskApiConfigs(imageApis),
       videoApis: maskApiConfigs(videoApis),
+      downloadApis: maskApiConfigs(downloadApis),
       defaultTextApiId: defaults?.defaultTextApiId || envConfigs?.defaultTextApiId || getEmptyConfigs().defaultTextApiId,
       defaultImageApiId: defaults?.defaultImageApiId || envConfigs?.defaultImageApiId || getEmptyConfigs().defaultImageApiId,
       defaultVideoApiId: defaults?.defaultVideoApiId || envConfigs?.defaultVideoApiId || getEmptyConfigs().defaultVideoApiId,
+      defaultDownloadApiId: defaults?.defaultDownloadApiId || envConfigs?.defaultDownloadApiId || getEmptyConfigs().defaultDownloadApiId,
     };
     
     return NextResponse.json({ data: result });
@@ -211,9 +227,11 @@ export async function GET() {
           textApis: maskApiConfigs(envConfigs.textApis),
           imageApis: maskApiConfigs(envConfigs.imageApis),
           videoApis: maskApiConfigs(envConfigs.videoApis),
+          downloadApis: maskApiConfigs(envConfigs.downloadApis || []),
           defaultTextApiId: envConfigs.defaultTextApiId,
           defaultImageApiId: envConfigs.defaultImageApiId,
           defaultVideoApiId: envConfigs.defaultVideoApiId,
+          defaultDownloadApiId: envConfigs.defaultDownloadApiId || '',
         }
       });
     }
@@ -222,14 +240,33 @@ export async function GET() {
 }
 
 // 脱敏配置对象
+type DefaultApiIds = {
+  defaultTextApiId?: string;
+  defaultImageApiId?: string;
+  defaultVideoApiId?: string;
+  defaultDownloadApiId?: string;
+};
+
+function mergeDefaultApiIds(existingDefaults: DefaultApiIds | undefined, updates: DefaultApiIds): Required<DefaultApiIds> {
+  const fallback = getEmptyConfigs();
+  return {
+    defaultTextApiId: updates.defaultTextApiId ?? existingDefaults?.defaultTextApiId ?? fallback.defaultTextApiId,
+    defaultImageApiId: updates.defaultImageApiId ?? existingDefaults?.defaultImageApiId ?? fallback.defaultImageApiId,
+    defaultVideoApiId: updates.defaultVideoApiId ?? existingDefaults?.defaultVideoApiId ?? fallback.defaultVideoApiId,
+    defaultDownloadApiId: updates.defaultDownloadApiId ?? existingDefaults?.defaultDownloadApiId ?? fallback.defaultDownloadApiId,
+  };
+}
+
 function maskConfigs(configs: ReturnType<typeof getEmptyConfigs>) {
   return {
     textApis: maskApiConfigs(configs.textApis),
     imageApis: maskApiConfigs(configs.imageApis),
     videoApis: maskApiConfigs(configs.videoApis),
+    downloadApis: maskApiConfigs(configs.downloadApis),
     defaultTextApiId: configs.defaultTextApiId,
     defaultImageApiId: configs.defaultImageApiId,
     defaultVideoApiId: configs.defaultVideoApiId,
+    defaultDownloadApiId: configs.defaultDownloadApiId,
   };
 }
 
@@ -309,12 +346,16 @@ export async function POST(request: NextRequest) {
     const videoApis = body.videoApis 
       ? processApiConfigs(body.videoApis, extractApiArray(existingConfig.videoApis)) 
       : undefined;
+    const downloadApis = body.downloadApis
+      ? processApiConfigs(body.downloadApis, extractApiArray(existingConfig.downloadApis))
+      : undefined;
     
     // 保存各个配置类型
     const configTypes = [
       { key: 'textApis', data: textApis },
       { key: 'imageApis', data: imageApis },
       { key: 'videoApis', data: videoApis },
+      { key: 'downloadApis', data: downloadApis },
     ];
     
     for (const { key, data } of configTypes) {
@@ -331,18 +372,27 @@ export async function POST(request: NextRequest) {
     }
     
     // 保存默认 ID
-    if (body.defaultTextApiId !== undefined || body.defaultImageApiId !== undefined || body.defaultVideoApiId !== undefined) {
+    if (
+      body.defaultTextApiId !== undefined ||
+      body.defaultImageApiId !== undefined ||
+      body.defaultVideoApiId !== undefined ||
+      body.defaultDownloadApiId !== undefined
+    ) {
+      const existingDefaults = existingConfig.defaults as DefaultApiIds | undefined;
+      const mergedDefaults = mergeDefaultApiIds(existingDefaults, {
+        defaultTextApiId: body.defaultTextApiId,
+        defaultImageApiId: body.defaultImageApiId,
+        defaultVideoApiId: body.defaultVideoApiId,
+        defaultDownloadApiId: body.defaultDownloadApiId,
+      });
+
       await client
         .from('system_config')
         .upsert({
           id: 'config_defaults',
           config_type: 'defaults',
           name: 'defaults',
-          extra_config: {
-            defaultTextApiId: body.defaultTextApiId,
-            defaultImageApiId: body.defaultImageApiId,
-            defaultVideoApiId: body.defaultVideoApiId,
-          },
+          extra_config: mergedDefaults,
         }, { onConflict: 'id' });
     }
     
@@ -395,3 +445,5 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: '重置配置失败' }, { status: 500 });
   }
 }
+
+export const mergeDefaultApiIdsForTest = mergeDefaultApiIds;
