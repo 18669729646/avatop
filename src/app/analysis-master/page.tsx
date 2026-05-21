@@ -250,7 +250,8 @@ export default function AnalysisMasterPage() {
   const [uploadState, setUploadState] = useState<UploadState>({ phase: 'idle' });
   const [error, setError] = useState('');
   const [batchSummary, setBatchSummary] = useState<BatchImportSummary | null>(null);
-  const { projects: serverProjects, pagination: projectPagination, mutate: mutateProjects, isLoading: isProjectsLoading } = useAnalysisMasterProjects(user?.id);
+  const [projectPage, setProjectPage] = useState(1);
+  const { projects: serverProjects, pagination: projectPagination, mutate: mutateProjects, isLoading: isProjectsLoading } = useAnalysisMasterProjects(user?.id, projectPage);
 
   const projects = useMemo(
     () => mergeAnalysisMasterProjects(serverProjects, draftProjects) as unknown as AnalysisProject[],
@@ -762,7 +763,16 @@ export default function AnalysisMasterPage() {
                   </Button>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  {projects.length === 0 ? (
+                  {isProjectsLoading && projects.length === 0 ? (
+                    <>
+                      {[1, 2, 3].map(i => (
+                        <div key={i} className="rounded-lg border p-3 animate-pulse">
+                          <div className="h-4 bg-muted rounded w-3/4 mb-2" />
+                          <div className="h-3 bg-muted rounded w-1/2" />
+                        </div>
+                      ))}
+                    </>
+                  ) : projects.length === 0 ? (
                     <div className="text-sm text-muted-foreground py-6 text-center">暂无分析项目</div>
                   ) : projects.map(project => (
                     <div key={project.id} className={`group relative rounded-lg border p-3 hover:bg-muted transition cursor-pointer ${selectedProject?.id === project.id ? 'border-primary bg-muted/60' : ''}`} onClick={() => setSelectedId(project.id)}>
@@ -809,10 +819,10 @@ export default function AnalysisMasterPage() {
                         size="sm"
                         onClick={() => {
                           if (projectPagination.page > 1) {
-                            mutateProjects().catch(err => setError(err.message));
+                            setProjectPage(projectPagination.page - 1);
                           }
                         }}
-                        disabled={projectPagination.page <= 1}
+                        disabled={projectPagination.page <= 1 || isProjectsLoading}
                       >
                         上一页
                       </Button>
@@ -824,10 +834,10 @@ export default function AnalysisMasterPage() {
                         size="sm"
                         onClick={() => {
                           if (projectPagination.page < projectPagination.totalPages) {
-                            mutateProjects().catch(err => setError(err.message));
+                            setProjectPage(projectPagination.page + 1);
                           }
                         }}
-                        disabled={projectPagination.page >= projectPagination.totalPages}
+                        disabled={projectPagination.page >= projectPagination.totalPages || isProjectsLoading}
                       >
                         下一页
                       </Button>

@@ -50,13 +50,13 @@ function authFetch(url: string) {
   });
 }
 
-export function useAnalysisMasterProjects(userId?: string | null) {
-  const cacheKey = userId ? `analysis-master-projects:${userId}` : null;
+export function useAnalysisMasterProjects(userId?: string | null, page = 1) {
+  const cacheKey = userId ? `analysis-master-projects:${userId}:page:${page}` : null;
 
   const { data, error, isLoading, mutate } = useSWR<ProjectsResponse>(
     cacheKey,
     async () => {
-      const response = await authFetch(`/api/analysis-master/projects?page=1&pageSize=${PROJECT_PAGE_SIZE}`);
+      const response = await authFetch(`/api/analysis-master/projects?page=${page}&pageSize=${PROJECT_PAGE_SIZE}`);
       if (!response.ok) {
         const body = await response.json().catch(() => ({ error: '获取项目列表失败' }));
         throw new Error(body.error || `HTTP ${response.status}`);
@@ -75,7 +75,7 @@ export function useAnalysisMasterProjects(userId?: string | null) {
   return {
     projects: data?.data || [],
     pagination: data?.pagination || {
-      page: 1,
+      page,
       pageSize: PROJECT_PAGE_SIZE,
       total: 0,
       totalPages: 0,
