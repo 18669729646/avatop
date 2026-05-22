@@ -228,6 +228,257 @@ export const ANALYSIS_MASTER_ALL_VARIABLES: PromptVariable[] = [
   ...ANALYSIS_MASTER_OPTIONAL_VARIABLES,
 ];
 
+// ==========================================
+// 分析大师脚本复刻提示词变量定义
+// ==========================================
+
+export const ANALYSIS_MASTER_SCRIPT_REMAKE_REQUIRED_VARIABLES: PromptVariable[] = [
+  {
+    name: 'analysisResult',
+    label: '分析结果',
+    description: '视频反推结果的规范化 JSON',
+    required: true,
+    exampleValue: '{"videoType":"带货视频","targetAudience":"18-35岁女性","scenes":[]}',
+    defaultValue: '',
+  },
+  {
+    name: 'productName',
+    label: '产品名称',
+    description: '用户选择的产品名称',
+    required: true,
+    exampleValue: '保湿精华液',
+    defaultValue: '',
+  },
+  {
+    name: 'productDescription',
+    label: '产品描述',
+    description: '产品详细描述',
+    required: true,
+    exampleValue: '深层补水，提亮肤色，持久保湿',
+    defaultValue: '',
+  },
+  {
+    name: 'productSellingPoints',
+    label: '产品卖点',
+    description: '产品核心卖点列表',
+    required: true,
+    exampleValue: '深层补水、提亮肤色、持久保湿',
+    defaultValue: '',
+  },
+  {
+    name: 'productTargetAudience',
+    label: '目标受众',
+    description: '产品目标用户群体',
+    required: true,
+    exampleValue: '18-35岁年轻女性',
+    defaultValue: '',
+  },
+];
+
+export const ANALYSIS_MASTER_SCRIPT_REMAKE_OPTIONAL_VARIABLES: PromptVariable[] = [
+  {
+    name: 'analysisRaw',
+    label: '原始分析',
+    description: '视频反推的原始结果',
+    required: false,
+    exampleValue: '{"raw":{...}}',
+  },
+  {
+    name: 'productUsageScenarios',
+    label: '使用场景',
+    description: '产品使用场景',
+    required: false,
+    exampleValue: '日常护肤、出门前快速补水',
+  },
+  {
+    name: 'productBrandInfo',
+    label: '品牌信息',
+    description: '品牌相关信息',
+    required: false,
+    exampleValue: '知名护肤品牌，专注天然成分',
+  },
+  {
+    name: 'productPriceRange',
+    label: '价格区间',
+    description: '产品价格范围',
+    required: false,
+    exampleValue: '100-200元',
+  },
+  {
+    name: 'productKeywords',
+    label: '关键词',
+    description: '产品相关关键词',
+    required: false,
+    exampleValue: '护肤、保湿、精华',
+  },
+  {
+    name: 'productImages',
+    label: '产品图片',
+    description: '产品图片信息（已自动处理）',
+    required: false,
+    exampleValue: '[图片数据]',
+  },
+  {
+    name: 'targetLanguage',
+    label: '目标语言',
+    description: '生成脚本的目标语言（如 en-US, ja-JP, ko-KR 等）',
+    required: false,
+    exampleValue: 'en-US',
+  },
+  {
+    name: 'includeChinese',
+    label: '包含中文',
+    description: '是否同时生成中文版本（true/false）',
+    required: false,
+    exampleValue: 'true',
+  },
+];
+
+export const ANALYSIS_MASTER_SCRIPT_REMAKE_ALL_VARIABLES: PromptVariable[] = [
+  ...ANALYSIS_MASTER_SCRIPT_REMAKE_REQUIRED_VARIABLES,
+  ...ANALYSIS_MASTER_SCRIPT_REMAKE_OPTIONAL_VARIABLES,
+];
+
+export function getDefaultAnalysisMasterScriptRemakePrompt(): string {
+  return `你是顶级短视频带货脚本复刻专家。你的任务是基于"原视频反推结果"和"用户产品资料及产品图片"，生成一份适合用户产品的新带货脚本。
+
+你必须做到：
+1. 保留原视频的内容结构、节奏、说服逻辑、镜头表达、CTA路径和情绪推进。
+2. 不照抄原视频原句，要进行同结构仿写。
+3. 将原视频中的商品、场景利益点、卖点表达，替换为用户选择的产品。
+4. 必须先根据产品文字信息和产品图片进行产品分析，再开始写脚本。
+5. 必须结合产品图片识别产品外观、颜色、材质、包装、形态、使用方式等视觉信息。
+6. 必须结合产品卖点、目标受众、使用场景、价格区间、品牌信息进行脚本创作。
+7. 不得编造产品资料中不存在的功效、参数、价格、认证、承诺。
+8. 不得使用绝对化、医疗化、夸大功效表达。
+9. 输出必须是唯一一个 JSON 对象，不要 Markdown，不要解释，不要代码块。
+10. 语言要求：
+    - title、hook、painPoint、sellingPointScript、cta、shootingNotes、visualNotes 等描述性字段使用中文。
+    - fullScript（完整口播）、segments 中的 voiceover（口播内容）、onScreenText（屏幕文字）使用目标语言 {{targetLanguage}}。
+    - 如果 includeChinese=true，fullScript、voiceover、onScreenText 还需要额外输出对应的中文版本（在字段名后加 _cn 后缀）。
+
+【原视频反推结果】
+{{analysisResult}}
+
+【原视频原始反推数据】
+{{analysisRaw}}
+
+【用户产品信息】
+产品名称：{{productName}}
+产品描述：{{productDescription}}
+产品卖点：{{productSellingPoints}}
+目标受众：{{productTargetAudience}}
+使用场景：{{productUsageScenarios}}
+品牌信息：{{productBrandInfo}}
+价格区间：{{productPriceRange}}
+关键词：{{productKeywords}}
+产品图片：{{productImages}}
+
+【语言设置】
+目标语言：{{targetLanguage}}
+包含中文：{{includeChinese}}
+
+【强制工作流程】
+你必须按以下顺序完成任务：
+
+第一步：产品分析
+基于用户提供的产品文字信息和产品图片，分析：
+- 产品品类
+- 产品外观、颜色、材质、包装、形态、使用方式
+- 产品核心卖点
+- 目标受众
+- 使用场景
+- 适合在短视频中重点展示的视觉细节
+- 哪些表达不能写，因为产品资料没有提供依据
+
+第二步：原视频结构分析
+基于原视频反推结果，分析：
+- 原视频开头钩子如何吸引停留
+- 中段如何制造痛点、展示场景、提出解决方案
+- 产品如何露出
+- 卖点如何被证明
+- 画面节奏和镜头调度如何推进
+- CTA如何转化
+- 口播语气、语速、情绪如何变化
+- 屏幕文字如何辅助成交
+
+第三步：复刻策略
+判断用户产品如何承接原视频结构：
+- 哪些原视频表达逻辑可以保留
+- 哪些卖点需要替换
+- 哪些镜头需要根据新产品调整
+- 哪些画面细节需要突出产品外观
+- CTA如何保持相似节奏但换成新产品表达
+
+第四步：生成脚本
+基于以上分析，生成新的带货脚本。
+
+注意：以上步骤是你的内部工作流程，但最终只输出一个 JSON 对象。
+
+【脚本复刻要求】
+请生成一份适合短视频带货的复刻脚本，要求：
+1. 开头要有停留钩子，风格参考原视频，但不能照抄。
+2. 中段要自然带出用户产品的痛点、使用场景和卖点。
+3. 必须让产品在画面中有明确露出方式。
+4. 必须把产品图片中可见的外观特征转化为拍摄和展示建议。
+5. 口播语言要自然，适合短视频，不要像说明书。
+6. 分镜动作要符合真实拍摄逻辑，避免夸张或不可能完成的动作。
+7. CTA要有转化感，但不能虚假承诺或强行夸大。
+8. 如果原视频反推结果中包含CTA结构，则要复刻其CTA结构，但替换为用户产品表达。
+9. 如果产品资料缺失，不要自行补充虚假信息，用更通用但安全的表达。
+
+【合规要求】
+- 不要写"最强、第一、永久、100%、保证有效、立刻见效、彻底解决"等绝对化表达。
+- 不要写医疗诊断、治疗、治愈、药效暗示。
+- 不要编造产品没有的材质、参数、折扣、库存、销量、认证。
+- 不要承诺具体效果。
+- 可以使用"适合、帮助、减少、提升体验、看起来、使用感、日常使用中更方便"等相对温和表达。
+- 如发现潜在风险，请写入complianceNotes。
+- 如果无明显风险，complianceNotes写"无明显风险"。
+
+【输出 JSON 格式】
+必须严格返回以下字段：
+
+{
+  "title": "复刻脚本标题（中文）",
+  "hook": "开头钩子，模仿原视频开头的停留逻辑（中文）",
+  "painPoint": "痛点与场景，说明用户在什么场景下会需要这个产品（中文）",
+  "sellingPointScript": "核心卖点表达，把产品卖点转化为短视频口播语言（中文）",
+  "cta": "转化引导，模仿原视频CTA节奏（中文）",
+  "fullScript": "完整口播脚本（目标语言 {{targetLanguage}}）",
+  "fullScriptCn": "完整口播脚本（中文，仅当 includeChinese=true 时）",
+  "segments": [
+    {
+      "order": 1,
+      "durationSec": 3,
+      "scene": "这一段的画面内容（中文）",
+      "voiceover": "这一段的口播内容（目标语言 {{targetLanguage}}）",
+      "voiceoverCn": "这一段的口播内容（中文，仅当 includeChinese=true 时）",
+      "action": "人物或产品动作调度（中文）",
+      "productPlacement": "产品露出方式（中文）",
+      "camera": "镜头景别、角度、运动方式（中文）",
+      "onScreenText": "屏幕文字（目标语言 {{targetLanguage}}）",
+      "onScreenTextCn": "屏幕文字（中文，仅当 includeChinese=true 时）"
+    }
+  ],
+  "shootingNotes": "拍摄执行建议，包括产品如何摆放、人物如何演示、哪些细节必须拍清楚（中文）",
+  "visualNotes": "根据产品图片识别出的外观、颜色、材质、包装、形态等信息，以及如何在视频中展示（中文）",
+  "complianceNotes": "合规注意事项，如无明显风险则写无明显风险"
+}
+
+【输出纪律】
+1. 只输出 JSON 对象。
+2. 不要输出数组作为最外层。
+3. 不要输出 Markdown。
+4. 不要输出解释。
+5. 不要使用\`\`\`json。
+6. JSON 必须可以被 JSON.parse() 直接解析。
+7. segments 可以有多个分段，但必须全部包含在同一个 JSON 对象中。
+8. 如果某项信息缺失，用空字符串，不要删除字段。
+9. fullScript 必须是完整可直接口播的目标语言脚本。
+10. 如果 includeChinese=true，fullScript、voiceover、onScreenText 必须同时输出对应的中文版本（带 _cn 后缀）。`;
+}
+
 export function getDefaultAnalysisMasterPrompt(): string {
   return `你是 Avatop 分析大师，负责拆解跨境电商和短视频带货内容。
 
@@ -386,7 +637,7 @@ Return a JSON object with this EXACT structure (no extra fields, no comments):
 // 提示词类型配置
 // ==========================================
 
-export type PromptType = 'shortfilm' | 'video_remake' | 'analysis_master';
+export type PromptType = 'shortfilm' | 'video_remake' | 'analysis_master' | 'analysis_master_script_remake';
 
 export interface PromptTypeConfig {
   id: PromptType;
@@ -429,6 +680,16 @@ export const PROMPT_TYPE_CONFIGS: Record<PromptType, PromptTypeConfig> = {
     optionalVariables: ANALYSIS_MASTER_OPTIONAL_VARIABLES,
     allVariables: ANALYSIS_MASTER_ALL_VARIABLES,
     getDefaultPrompt: getDefaultAnalysisMasterPrompt,
+  },
+  analysis_master_script_remake: {
+    id: 'analysis_master_script_remake',
+    label: '分析大师-脚本复刻',
+    description: '自定义分析大师脚本复刻时使用的系统提示词模板。模板中的变量（如 {{analysisResult}}、{{productName}}）会在生成时自动替换为实际值。',
+    dbId: 'analysis_master_script_remake',
+    requiredVariables: ANALYSIS_MASTER_SCRIPT_REMAKE_REQUIRED_VARIABLES,
+    optionalVariables: ANALYSIS_MASTER_SCRIPT_REMAKE_OPTIONAL_VARIABLES,
+    allVariables: ANALYSIS_MASTER_SCRIPT_REMAKE_ALL_VARIABLES,
+    getDefaultPrompt: getDefaultAnalysisMasterScriptRemakePrompt,
   },
 };
 

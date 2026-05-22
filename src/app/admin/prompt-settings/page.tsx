@@ -31,6 +31,7 @@ export default function PromptSettingsPage() {
     shortfilm: null,
     video_remake: null,
     analysis_master: null,
+    analysis_master_script_remake: null,
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

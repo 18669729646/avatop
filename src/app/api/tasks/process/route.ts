@@ -15,6 +15,12 @@ import {
   analyzeVideoBufferWithGemini,
 } from '@/lib/analysis-master';
 import { executeAnalysisBatchImportTask } from '@/lib/analysis-master-batch-processor';
+import {
+  ANALYSIS_MASTER_SCRIPT_REMAKE_ACTION_TYPE,
+  generateScriptRemake,
+  normalizeScriptRemakeResult,
+  type ScriptRemakeTaskParams,
+} from '@/lib/analysis-master-script-remake';
 
 // 任务执行状态（内存中跟踪正在处理的任务）
 const processingTasks = new Set<string>();
@@ -231,9 +237,9 @@ interface AnalysisBatchImportTaskParams {
 // 任务项（数据库格式）
 interface QueueTask {
   id: string;
-  type: 'image' | 'video' | 'script' | 'analysis' | 'analysis_batch_import';
+  type: 'image' | 'video' | 'script' | 'analysis' | 'analysis_batch_import' | 'script_remake';
   status: 'pending' | 'running' | 'retrying' | 'success' | 'failed';
-  params: ImageTaskParams | VideoTaskParams | ScriptTaskParams | AnalysisTaskParams | AnalysisBatchImportTaskParams;
+  params: ImageTaskParams | VideoTaskParams | ScriptTaskParams | AnalysisTaskParams | AnalysisBatchImportTaskParams | ScriptRemakeTaskParams;
   result?: { 
     url?: string; 
     taskId?: string; 
@@ -412,6 +418,8 @@ async function processTask(task: QueueTask): Promise<void> {
       await executeAnalysisTask(task, supabase);
     } else if (task.type === 'analysis_batch_import') {
       await executeAnalysisBatchImportTask(task, supabase);
+    } else if (task.type === 'script_remake') {
+      await executeScriptRemakeTask(task, supabase);
     }
 
   } catch (error) {
@@ -2117,4 +2125,166 @@ async function handleVideoRemakeVideoComplete(
   } catch (error) {
     console.error(`[视频复刻V3] 视频生成完成处理失败:`, error);
   }
+}
+
+async function executeScriptRemakeTask(task: QueueTask, supabase: ReturnType<typeof getSupabaseClient>): Promise<void> {
+  const params = task.params as ScriptRemakeTaskParams;
+  const scriptRemakeId = params.scriptRemakeId;
+  const projectId = params.projectId;
+  const language = params.language || 'en-US';
+  const includeChinese = params.includeChinese !== false;
+
+  if (!scriptRemakeId) {
+    throw new Error('脚本复刻任务缺少ID');
+  }
+
+  if (!task.user_id) {
+    throw new Error('脚本复刻任务缺少用户ID');
+  }
+
+  const { data: scriptRemake, error: fetchError } = await supabase
+    .from('analysis_master_script_remakes')
+    .select('*')
+    .eq('id', scriptRemakeId)
+    .eq('user_id', task.user_id)
+    .single();
+
+  if (fetchError || !scriptRemake) {
+    throw new Error('脚本复刻记录不存在');
+  }
+
+  broadcastTaskUpdate({
+    taskId: task.id,
+    type: 'script_remake',
+    status: 'started',
+    projectId,
+  });
+
+  console.log(`[Script Remake] 开始执行任务: ${task.id}, language=${language}, includeChinese=${includeChinese}`);
+
+  const analysisResultRaw = params.analysisResult;
+  const productSnapshot = params.productSnapshot as Record<string, unknown>;
+
+  const analysisResult = normalizeAnalysisMasterResult(analysisResultRaw);
+  const productImages = Array.isArray(productSnapshot.images) ? productSnapshot.images : [];
+  const productAllImages = Array.isArray(productSnapshot.allImages) ? productSnapshot.allImages : [];
+
+  const product: Parameters<typeof generateScriptRemake>[0]['product'] = {
+    id: String(productSnapshot.id || ''),
+    name: String(productSnapshot.name || ''),
+    description: String(productSnapshot.description || ''),
+    sellingPoints: Array.isArray(productSnapshot.sellingPoints) ? productSnapshot.sellingPoints as string[] : [],
+    targetAudience: String(productSnapshot.target_audience || productSnapshot.targetAudience || ''),
+    usageScenarios: String(productSnapshot.usage_scenarios || productSnapshot.usageScenarios || ''),
+    brandInfo: String(productSnapshot.brand_info || productSnapshot.brandInfo || ''),
+    priceRange: String(productSnapshot.price_range || productSnapshot.priceRange || ''),
+    keywords: Array.isArray(productSnapshot.keywords) ? productSnapshot.keywords as string[] : [],
+    primaryImage: productImages[0]?.url || productAllImages[0]?.url || '',
+    allImages: productAllImages.map(img => {
+      if (typeof img === 'string') return { key: '', url: img };
+      return { key: img.key || '', url: img.url || '' };
+    }),
+  };
+
+  const result = await generateScriptRemake({ analysisResult, product, language, includeChinese });
+  const now = new Date().toISOString();
+
+  const scriptActionType = params.actionType === ANALYSIS_MASTER_SCRIPT_REMAKE_ACTION_TYPE
+    ? params.actionType
+    : ANALYSIS_MASTER_SCRIPT_REMAKE_ACTION_TYPE;
+  const creditsRequired = typeof params.creditsRequired === 'number' && params.creditsRequired >= 0
+    ? params.creditsRequired
+    : null;
+
+  const chargeResult = creditsRequired === 0
+    ? { success: true, error: undefined as string | undefined }
+    : creditsRequired !== null
+      ? await consumeFixedCredits(
+        task.user_id,
+        scriptActionType,
+        creditsRequired,
+        task.id,
+        'script_remake'
+      )
+      : await consumeCredits(task.user_id, scriptActionType, task.id, 'script_remake');
+
+  if (!chargeResult.success) {
+    await supabase
+      .from('analysis_master_script_remakes')
+      .update({
+        status: 'failed',
+        error: chargeResult.error || '扣除积分失败',
+        updated_at: now,
+      })
+      .eq('id', scriptRemakeId)
+      .eq('user_id', task.user_id);
+    throw new Error(chargeResult.error || '扣除积分失败');
+  }
+
+  await supabase
+    .from('analysis_master_script_remakes')
+    .update({
+      status: 'completed',
+      language,
+      title: result.title,
+      hook: result.hook,
+      pain_point: result.painPoint,
+      selling_point_script: result.sellingPointScript,
+      cta: result.cta,
+      full_script: result.fullScript,
+      full_script_cn: result.fullScriptCn,
+      segments: result.segments,
+      shooting_notes: result.shootingNotes,
+      visual_notes: result.visualNotes,
+      compliance_notes: result.complianceNotes,
+      error: null,
+      updated_at: now,
+    })
+    .eq('id', scriptRemakeId)
+    .eq('user_id', task.user_id);
+
+  await supabase
+    .from('task_queue')
+    .update({
+      status: 'success',
+      result: {
+        scriptRemakeId,
+        title: result.title,
+      },
+      error: null,
+      completed_at: now,
+    })
+    .eq('id', task.id);
+
+  broadcastTaskUpdate({
+    taskId: task.id,
+    type: 'script_remake',
+    status: 'success',
+    projectId,
+    result: {
+      scriptRemakeId,
+      title: result.title,
+    },
+  });
+
+  logInfo('task', '脚本复刻任务完成', { taskId: task.id, scriptRemakeId, title: result.title }, task.user_id);
+}
+
+function normalizeAnalysisMasterResult(raw: Record<string, unknown>): Parameters<typeof generateScriptRemake>[0]['analysisResult'] {
+  return {
+    summary: String(raw.summary || ''),
+    videoType: String(raw.videoType || ''),
+    targetAudience: String(raw.targetAudience || ''),
+    sellingPoints: Array.isArray(raw.sellingPoints) ? raw.sellingPoints as string[] : [],
+    scenes: Array.isArray(raw.scenes) ? raw.scenes as Parameters<typeof generateScriptRemake>[0]['analysisResult']['scenes'] : [],
+    imagePrompt: String(raw.imagePrompt || ''),
+    videoPrompt: String(raw.videoPrompt || ''),
+    dialogue_vo_original: String(raw.dialogue_vo_original || ''),
+    dialogue_vo_zh: String(raw.dialogue_vo_zh || ''),
+    cta_a: String(raw.cta_a || ''),
+    cta_b: String(raw.cta_b || ''),
+    cta_c: String(raw.cta_c || ''),
+    cta_d: String(raw.cta_d || ''),
+    raw: (raw.raw || {}) as Record<string, unknown>,
+  };
 }
