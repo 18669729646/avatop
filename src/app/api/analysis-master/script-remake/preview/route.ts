@@ -122,9 +122,9 @@ export async function POST(request: NextRequest) {
         temperature: 0.3,
         topP: 0.9,
         maxOutputTokens: 32768,
+        responseMimeType: 'application/json',
+        responseSchema: SCRIPT_REMAKE_JSON_SCHEMA,
       },
-      // 使用 responseSchema 确保 JSON 输出（比 response_mime_type 更可靠）
-      responseSchema: SCRIPT_REMAKE_JSON_SCHEMA,
     };
 
     // 返回预览数据
