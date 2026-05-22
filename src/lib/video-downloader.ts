@@ -680,6 +680,7 @@ export async function downloadVideoFromUrl(url: string, options: VideoDownloadOp
     const maxBytes = options.maxBytes || DEFAULT_MAX_BYTES;
     const plan = getVideoDownloadAttemptPlan(url, provider);
     let lastError: Error | null = null;
+    const providerErrors: Record<string, string> = {};
 
     for (const currentProvider of plan) {
       try {
@@ -695,10 +696,26 @@ export async function downloadVideoFromUrl(url: string, options: VideoDownloadOp
         return result;
       } catch (providerError) {
         lastError = providerError as Error;
+        providerErrors[currentProvider] = lastError.message;
         const hasFallback = plan.indexOf(currentProvider) < plan.length - 1;
         if (!hasFallback) break;
         console.warn(`[VideoDownloader] [auto] ${currentProvider} 失败，降级 ${plan[plan.indexOf(currentProvider) + 1]}: ${lastError.message}`);
       }
+    }
+
+    // 优化最终错误信息：TikTok 链接下载失败时提示具体原因
+    if (isTiktokLikeUrl(url) && lastError) {
+      const hadTikHub = plan.includes('tikhub') && providerErrors.tikhub;
+      const tikhubDetail = hadTikHub ? providerErrors.tikhub : '';
+      let hint = '';
+      if (tikhubDetail.includes('fetch failed') || tikhubDetail.includes('ECONNREFUSED') || tikhubDetail.includes('reset by peer')) {
+        hint = 'TikHub 获取视频信息成功，但视频 CDN 无法访问（网络限制）。请尝试上传本地视频文件代替链接导入';
+      } else if (tikhubDetail.includes('未配置') || tikhubDetail.includes('不可用')) {
+        hint = 'TikHub API Key 未配置或不可用，yt-dlp 也无法访问 TikTok（网络限制）。请在系统设置中配置 TikHub API Key';
+      } else {
+        hint = '所有下载方式均失败。TikTok 视频在中国大陆服务器上可能无法直接下载，请尝试上传本地视频文件';
+      }
+      throw new Error(`视频下载失败：${hint}`);
     }
 
     throw lastError || new Error('视频下载失败');
