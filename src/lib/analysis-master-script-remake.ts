@@ -75,6 +75,16 @@ function extractJsonObject(text: string): Record<string, unknown> {
     // 继续尝试提取
   }
 
+  // 尝试提取 <final_output> 标签内的 JSON（新版提示词模板要求）
+  const finalOutputMatch = text.match(/<final_output>\s*([\s\S]*?)\s*<\/final_output>/i);
+  if (finalOutputMatch) {
+    try {
+      return JSON.parse(finalOutputMatch[1].trim());
+    } catch {
+      // 继续尝试
+    }
+  }
+
   // 尝试提取 markdown 代码块中的 JSON
   const codeBlockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
   if (codeBlockMatch) {
