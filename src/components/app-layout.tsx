@@ -193,6 +193,12 @@ function AppLayoutInner({ children }: AppLayoutProps) {
       router.push('/landing');
     }
     
+    // 管理员专属页面：视频复刻和复刻大师对非管理员隐藏
+    const adminOnlyPaths = ['/video-remake', '/remake-pro'];
+    if (adminOnlyPaths.some(p => pathname.startsWith(p)) && !isAdmin) {
+      router.push('/');
+    }
+    
     // 如果已登录且访问登录/注册页，重定向到功能首页
     // 已登录用户可以访问 SaaS 首页 (/landing)
     if (isPublicPath && isAuthenticated && pathname !== '/landing') {
@@ -302,7 +308,15 @@ function AppLayoutInner({ children }: AppLayoutProps) {
           {/* 导航区域 */}
           <nav className="flex-1 min-h-0 overflow-y-auto py-2">
             <div className="space-y-1 px-2">
-              {navigationItems.map((item) => {
+              {navigationItems
+                .filter(item => {
+                  // 视频复刻和复刻大师仅对管理员可见
+                  if ((item.id === 'video-remake' || item.id === 'remake-pro') && !isAdmin) {
+                    return false;
+                  }
+                  return true;
+                })
+                .map((item) => {
                 const Icon = item.icon;
                 const active = isActive(item.href);
                 
