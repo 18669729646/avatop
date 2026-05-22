@@ -9,7 +9,7 @@ import tempfile
 
 HOST = "127.0.0.1"
 PORT = 17321
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 YTDLP_SINGLE_FILE_FORMAT = "best[ext=mp4][acodec!=none][vcodec!=none]/best[acodec!=none][vcodec!=none]/best"
 
 
@@ -169,6 +169,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+        self.send_header("Access-Control-Allow-Private-Network", "true")
         self.end_headers()
         self.wfile.write(body)
 

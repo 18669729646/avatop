@@ -49,7 +49,7 @@ powershell -ExecutionPolicy Bypass -File tools\analysis-download-helper\build-wi
 The build script creates:
 
 ```text
-tools/analysis-download-helper/dist/analysis-download-helper-0.1.1.zip
+tools/analysis-download-helper/dist/analysis-download-helper-0.1.2.zip
 ```
 
 The zip contains:

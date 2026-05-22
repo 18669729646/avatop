@@ -1,5 +1,5 @@
 param(
-  [string]$Version = "0.1.1",
+  [string]$Version = "0.1.2",
   [string]$YtDlpPath = ""
 )
 
@@ -53,6 +53,17 @@ analysis-download-helper.exe
 Set-Content -LiteralPath (Join-Path $BundleDir "start-helper.bat") -Value $StartScript -Encoding ASCII
 
 $ZipPath = Join-Path $DistRoot "analysis-download-helper-$Version.zip"
-Compress-Archive -Path (Join-Path $BundleDir "*") -DestinationPath $ZipPath -Force
+for ($attempt = 1; $attempt -le 5; $attempt++) {
+  try {
+    Start-Sleep -Seconds 1
+    Compress-Archive -Path (Join-Path $BundleDir "*") -DestinationPath $ZipPath -Force
+    break
+  } catch {
+    if ($attempt -eq 5) {
+      throw
+    }
+    Start-Sleep -Seconds 2
+  }
+}
 
 Write-Host "Built $ZipPath"
