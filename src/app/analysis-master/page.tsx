@@ -805,7 +805,9 @@ export default function AnalysisMasterPage() {
 
       const blob = await response.blob();
       const disposition = response.headers.get('content-disposition') || '';
-      const filename = disposition.match(/filename="([^"]+)"/)?.[1] || 'analysis-master-export.xlsx';
+      const utf8Filename = disposition.match(/filename\*=UTF-8''([^;]+)/)?.[1];
+      const asciiFilename = disposition.match(/filename="([^"]+)"/)?.[1];
+      const filename = utf8Filename ? decodeURIComponent(utf8Filename) : (asciiFilename || 'analysis-master-export.xlsx');
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;

@@ -86,7 +86,9 @@ export function ScriptRemakeDetailModal({ scriptRemake, open, onClose }: ScriptR
       const a = document.createElement('a');
       a.href = url;
       const disposition = response.headers.get('content-disposition') || '';
-      const serverFilename = disposition.match(/filename="([^"]+)"/)?.[1];
+      const utf8Filename = disposition.match(/filename\*=UTF-8''([^;]+)/)?.[1];
+      const asciiFilename = disposition.match(/filename="([^"]+)"/)?.[1];
+      const serverFilename = utf8Filename ? decodeURIComponent(utf8Filename) : asciiFilename;
       a.download = serverFilename || `script-remake-${scriptRemake.id.slice(-8)}.xlsx`;
       document.body.appendChild(a);
       a.click();

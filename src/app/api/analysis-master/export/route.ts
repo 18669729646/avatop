@@ -71,10 +71,11 @@ export async function POST(request: NextRequest) {
     } else {
       filename = `${dateStr}_反推脚本批量导出.xlsx`;
     }
+    const encodedFilename = encodeURIComponent(filename);
     return new NextResponse(new Uint8Array(workbook), {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Disposition': `attachment; filename="${encodedFilename}"; filename*=UTF-8''${encodedFilename}`,
       },
     });
   } catch (error) {
