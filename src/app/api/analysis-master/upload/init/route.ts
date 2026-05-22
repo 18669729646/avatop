@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { fileName, fileSize, chunkSize, totalChunks, name } = body;
+    const { fileName, fileSize, chunkSize, totalChunks, name, sourceUrl } = body;
 
     if (!fileName || !fileSize) {
       console.error('[init] 缺少参数:', { fileName, fileSize, bodyKeys: Object.keys(body) });
@@ -80,6 +80,7 @@ export async function POST(request: NextRequest) {
       fileName,
       fileSize,
       name: name || fileName,
+      sourceUrl: typeof sourceUrl === 'string' && sourceUrl.trim() ? sourceUrl.trim() : undefined,
       chunkSize,
       totalChunks,
       receivedChunks: [] as number[],

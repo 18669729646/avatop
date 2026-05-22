@@ -12,7 +12,7 @@ import { Progress } from '@/components/ui/progress';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
-import { authFetch, useAuth } from '@/lib/auth-context';
+import { authFetch, getAuthToken, useAuth } from '@/lib/auth-context';
 import { useTaskEvents } from '@/hooks/use-task-events';
 import { Download, FileSpreadsheet, Loader2, Music, Play, RefreshCw, Sparkles, Upload, Copy, Trash2 } from 'lucide-react';
 import { copyToClipboard } from '@/lib/prompt-templates';
@@ -27,6 +27,10 @@ import {
 } from '@/lib/analysis-master-drafts';
 import { ScriptRemakePanel } from '@/components/script-remake-panel';
 import { ScriptRemakeDetailModal } from '@/components/script-remake-detail-modal';
+import {
+  ANALYSIS_LOCAL_HELPER_URL,
+  buildAnalysisLocalHelperRequest,
+} from '@/lib/analysis-master-local-helper';
 
 const ANALYSIS_MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 
@@ -622,7 +626,7 @@ export default function AnalysisMasterPage() {
   const createFromLink = async () => {
     const url = sourceUrl.trim();
     if (!url) {
-      setError('请输入 TikTok/抖音视频链接');
+      setError('请输入视频链接');
       console.log('[从链接导入] URL 为空，sourceUrl=', sourceUrl);
       return;
     }
@@ -643,28 +647,47 @@ export default function AnalysisMasterPage() {
     ]);
     setSelectedId(clientRequestId);
     try {
-      const response = await authFetch('/api/analysis-master/projects', {
+      const helperRequest = buildAnalysisLocalHelperRequest({
+        sourceUrl: url,
+        projectName: projectName.trim() || '链接分析项目',
+        saasBaseUrl: window.location.origin,
+        authToken: getAuthToken(),
+        chunkSize: CHUNK_SIZE,
+      });
+
+      const healthController = new AbortController();
+      const healthTimeout = window.setTimeout(() => healthController.abort(), 2000);
+      try {
+        const healthRes = await fetch(`${ANALYSIS_LOCAL_HELPER_URL}/health`, {
+          signal: healthController.signal,
+        });
+        if (!healthRes.ok) {
+          throw new Error('helper unavailable');
+        }
+      } catch {
+        throw new Error('解析组件未连接，请启动后重试；也可以直接上传视频继续分析。');
+      } finally {
+        window.clearTimeout(healthTimeout);
+      }
+
+      const response = await fetch(`${ANALYSIS_LOCAL_HELPER_URL}/v1/download`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sourceUrl: url,
-          name: projectName.trim() || '链接分析项目',
-          clientRequestId,
-        }),
+        body: JSON.stringify(helperRequest),
       });
       console.log('[从链接导入] 响应状态:', response.status);
       const data = await response.json();
       console.log('[从链接导入] 响应数据:', data);
-      if (!response.ok) throw new Error(data.error || '创建失败');
+      if (!response.ok || data.success === false) throw new Error(data.error || '视频解析失败，请检查当前网络环境后重试。');
       setSourceUrl('');
       setProjectName('');
-      const createdProject = data.data as AnalysisProject;
+      const createdProject = (data.data || data) as { id?: string; projectId?: string };
       setDraftProjects(prev => prev.filter(item => item.clientRequestId !== clientRequestId));
       await mutateProjects().catch(refreshErr => {
         console.warn('[从链接导入] 列表刷新失败，但项目已创建:', refreshErr);
       });
-      setSelectedId(createdProject.id);
-      console.log('[从链接导入] 成功, projectId=', data.data.id);
+      setSelectedId(String(createdProject.id || createdProject.projectId || ''));
+      console.log('[从链接导入] 成功, projectId=', createdProject.id || createdProject.projectId);
     } catch (err) {
       const msg = err instanceof Error ? err.message : '创建失败';
       console.error('[从链接导入] 失败:', msg);
@@ -937,6 +960,13 @@ export default function AnalysisMasterPage() {
                       {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
                       从链接导入
                     </Button>
+                    <a
+                      href="/analysis-helper/analysis-download-helper-0.1.0.zip"
+                      className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      <Download className="w-3 h-3" />
+                      下载解析组件
+                    </a>
                   </div>
                   <div className="space-y-2">
                     <Label>或上传视频</Label>

@@ -181,11 +181,14 @@ export async function POST(request: NextRequest) {
           video_key: s3Key,
           video_url: url,
           status: 'draft',
-          source_type: 'upload',
+          source_type: typeof session.sourceUrl === 'string' ? 'link' : 'upload',
           file_size: mergedBuffer.length,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
+        if (typeof session.sourceUrl === 'string') {
+          upsertData.source_url = session.sourceUrl;
+        }
         if (videoDuration > 0) {
           upsertData.video_duration = videoDuration;
         }

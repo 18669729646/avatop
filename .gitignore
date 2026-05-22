@@ -87,6 +87,7 @@ Desktop.ini
 *.tgz
 *.gz
 *.zip
+!public/analysis-helper/*.zip
 *.tar
 
 # TypeScript
