@@ -75,11 +75,24 @@ export async function GET(request: NextRequest) {
 
   const userId = authResult.userId;
   const isAdmin = authResult.payload.role === 'admin';
-  const scriptRemakeId = request.nextUrl.searchParams.get('id');
+  let scriptRemakeId = request.nextUrl.searchParams.get('id');
   const projectId = request.nextUrl.searchParams.get('projectId');
 
   try {
     const client = getSupabaseClient();
+
+    // 如果传入的是 taskId，需要先查询对应的 scriptRemakeId
+    if (scriptRemakeId && scriptRemakeId.startsWith('sr-task-')) {
+      const { data: taskData, error: taskError } = await client
+        .from('task_queue')
+        .select('params')
+        .eq('id', scriptRemakeId)
+        .single();
+
+      if (!taskError && taskData?.params?.scriptRemakeId) {
+        scriptRemakeId = taskData.params.scriptRemakeId;
+      }
+    }
 
     if (scriptRemakeId) {
       const { data: item, error } = await client
