@@ -343,16 +343,43 @@ export function ScriptRemakePanel({ selectedProject, isAdmin = false }: ScriptRe
   // 管理员：确认执行生成
   const confirmGenerate = async () => {
     setShowPreview(false);
-    const data = previewData as { scriptRemakeId: string } | null;
-    if (!data?.scriptRemakeId) return;
+    if (!selectedProject?.id || !selectedProduct) return;
 
-    setCurrentScriptRemakeId(data.scriptRemakeId);
-    setCurrentTaskId(`sr-task-${data.scriptRemakeId}`);
     setGenerating(true);
     setLoading(true);
+    setError('');
 
     try {
-      const pollResult = await pollScriptRemakeStatus(data.scriptRemakeId, (attempt, retry) => {
+      // 构造请求体（与 handleGenerate 中一致）
+      const requestBody = {
+        projectId: selectedProject.id,
+        productId: selectedProduct.id,
+        language: selectedLanguage,
+        includeChinese: selectedLanguage === 'en-US',
+        extraRequirements: extraRequirements || undefined,
+      };
+
+      // POST 到主 API
+      const response = await authFetch('/api/analysis-master/script-remake', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        setError(result.error || '脚本生成失败');
+        setGenerating(false);
+        setLoading(false);
+        return;
+      }
+
+      const taskId = result.data.taskId;
+      const scriptRemakeId = result.data.scriptRemakeId;
+      setCurrentTaskId(taskId);
+      setCurrentScriptRemakeId(scriptRemakeId);
+
+      const pollResult = await pollScriptRemakeStatus(scriptRemakeId, (attempt, retry) => {
         setPollProgress({ attempt, retry });
         setRetryCount(retry);
         setGenerating(true);
