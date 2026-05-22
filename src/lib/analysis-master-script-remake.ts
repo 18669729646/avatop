@@ -218,6 +218,7 @@ export async function generateScriptRemake(
 
   const result = await response.json();
   const text = result.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  console.log(`[Script Remake] AI 返回内容长度: ${text.length}, 内容预览: ${text.slice(0, 500)}`);
   const rawResult = extractJsonObject(text);
 
   return normalizeScriptRemakeResult(rawResult);
