@@ -2207,7 +2207,13 @@ async function executeScriptRemakeTask(task: QueueTask, supabase: ReturnType<typ
   let rawApiResponse: Record<string, unknown> | null = null;
 
   try {
-    result = await generateScriptRemake({ analysisResult, product, language, includeChinese }, {}, params.scriptRemakeId);
+    result = await generateScriptRemake({
+      analysisResult,
+      product,
+      language,
+      includeChinese,
+      extraRequirements: params.extraRequirements,
+    }, {}, params.scriptRemakeId);
     rawApiResponse = result.rawResult || null;
   } catch (error) {
     // 尝试获取原始返回以便保存到数据库
