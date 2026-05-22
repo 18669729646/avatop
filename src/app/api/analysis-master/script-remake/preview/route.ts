@@ -87,36 +87,51 @@ export async function POST(request: NextRequest) {
 
     // 获取图片数据
     const imageBuffers: Array<{ mimeType: string; data: string }> = [];
+    // 获取 API 配置（与实际调用一致）
+    const { getServerDefaultTextApi } = await import('@/lib/server-config');
+    const apiConfig = await getServerDefaultTextApi();
+    const model = apiConfig?.model || 'gemini-2.5-flash';
+    const baseUrl = apiConfig?.baseUrl?.replace(/\/+$/, '') || '';
+    const basePath = baseUrl.includes('/v1beta') || baseUrl.includes('/v1') ? baseUrl : `${baseUrl}/v1beta`;
+    const endpoint = `${basePath}/models/${model}:generateContent`;
+
     const maxImages = 5;
     const productImages = productSnapshot.images?.slice(0, maxImages) || [];
 
+    // 构建完整的请求体（与实际调用完全一致）
+    const parts: Array<Record<string, unknown>> = [{ text: prompt }];
     for (const img of productImages) {
       const buffer = await fetchImageData(img.url);
       if (buffer) {
-        imageBuffers.push({
-          mimeType: img.url.includes('.png') ? 'image/png' : 'image/jpeg',
-          data: buffer.toString('base64'),
+        parts.push({
+          inline_data: {
+            mime_type: img.url.includes('.png') ? 'image/png' : 'image/jpeg',
+            data: buffer.toString('base64'),
+          },
         });
       }
     }
 
-    const previewPayload = {
-      contents: [
-        { parts: [{ text: prompt }, ...imageBuffers.map(img => ({ inlineData: img }))] }
-      ],
+    const requestBody = {
+      contents: [{ parts }],
+      generationConfig: {
+        temperature: 0.3,
+        topP: 0.9,
+        maxOutputTokens: 32768,
+        response_mime_type: 'application/json',
+      },
     };
 
     // 返回预览数据
     return NextResponse.json({
       success: true,
       data: {
-        projectId,
-        productId,
-        language: language || 'en-US',
-        includeChinese: includeChinese !== false,
-        extraRequirements: extraRequirements || '',
+        endpoint,
+        model,
         prompt,
-        payload: previewPayload,
+        requestBody,
+        imagesCount: productImages.length,
+        extraRequirements: extraRequirements || '',
         productSnapshot: {
           id: product.id,
           name: product.name,

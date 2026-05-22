@@ -57,6 +57,27 @@ interface AnalysisProject {
   result?: unknown;
 }
 
+// 管理员预览数据类型
+interface ScriptRemakePreviewData {
+  endpoint?: string;
+  model?: string;
+  prompt?: string;
+  requestBody?: Record<string, unknown>;
+  imagesCount?: number;
+  extraRequirements?: string;
+  productSnapshot?: {
+    id: string;
+    name: string;
+    description: string;
+    sellingPoints?: string[];
+  };
+  analysisSnapshot?: {
+    summary?: string;
+    videoPrompt?: string;
+    imagePrompt?: string;
+  };
+}
+
 const TIKTOK_LANGUAGES = [
   { value: 'zh-CN', label: '中文' },
   { value: 'en-US', label: '英语（美国）' },
@@ -100,7 +121,7 @@ export function ScriptRemakePanel({ selectedProject, isAdmin = false }: ScriptRe
   const [extraRequirements, setExtraRequirements] = useState('');
   // 管理员预览状态
   const [showPreview, setShowPreview] = useState(false);
-  const [previewData, setPreviewData] = useState<Record<string, unknown> | null>(null);
+  const [previewData, setPreviewData] = useState<ScriptRemakePreviewData | null>(null);
   const [generating, setGenerating] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState('en-US');
 
@@ -408,7 +429,17 @@ export function ScriptRemakePanel({ selectedProject, isAdmin = false }: ScriptRe
         });
         const previewResult = await previewRes.json();
         if (!previewRes.ok) throw new Error(previewResult.error || '预览失败');
-        setPreviewData({ ...requestBody, scriptRemakeId: previewResult.data?.scriptRemakeId });
+        // 存储完整的预览数据（包含 endpoint, model, prompt, requestBody 等）
+        setPreviewData({
+          endpoint: previewResult.data?.endpoint,
+          model: previewResult.data?.model,
+          prompt: previewResult.data?.prompt,
+          requestBody: previewResult.data?.requestBody,
+          imagesCount: previewResult.data?.imagesCount,
+          extraRequirements: previewResult.data?.extraRequirements,
+          productSnapshot: previewResult.data?.productSnapshot,
+          analysisSnapshot: previewResult.data?.analysisSnapshot,
+        });
         setShowPreview(true);
       } catch (err) {
         setError(err instanceof Error ? err.message : '预览失败');
@@ -863,19 +894,66 @@ export function ScriptRemakePanel({ selectedProject, isAdmin = false }: ScriptRe
 
       {/* 管理员预览弹窗 */}
       <Dialog open={showPreview} onOpenChange={(open) => { if (!open) { setShowPreview(false); setPreviewData(null); } }}>
-        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>管理员预览 - 确认生成请求</DialogTitle>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto space-y-4">
             {previewData && (
               <>
+                {/* API 端点 */}
                 <div>
-                  <div className="text-sm font-medium text-muted-foreground mb-2">POST 请求体</div>
-                  <pre className="text-xs bg-muted p-3 rounded-lg overflow-x-auto whitespace-pre-wrap">
-                    {JSON.stringify(previewData, null, 2)}
+                  <div className="text-sm font-medium text-muted-foreground mb-2">API 端点</div>
+                  <pre className="text-xs bg-muted p-3 rounded-lg overflow-x-auto">
+                    POST {previewData.endpoint || '/api/...'}
                   </pre>
                 </div>
+
+                {/* 模型 */}
+                <div>
+                  <div className="text-sm font-medium text-muted-foreground mb-2">模型</div>
+                  <pre className="text-xs bg-muted p-3 rounded-lg overflow-x-auto">
+                    {previewData.model || 'gemini-2.5-flash'}
+                  </pre>
+                </div>
+
+                {/* 完整请求体 */}
+                <div>
+                  <div className="text-sm font-medium text-muted-foreground mb-2">
+                    完整请求体 (generationConfig + contents)
+                  </div>
+                  <pre className="text-xs bg-muted p-3 rounded-lg overflow-x-auto whitespace-pre-wrap">
+                    {JSON.stringify(previewData.requestBody || previewData, null, 2)}
+                  </pre>
+                </div>
+
+                {/* 提示词内容 */}
+                <div>
+                  <div className="text-sm font-medium text-muted-foreground mb-2">
+                    提示词内容 ({previewData.prompt?.length || 0} 字符)
+                  </div>
+                  <pre className="text-xs bg-muted p-3 rounded-lg overflow-x-auto whitespace-pre-wrap max-h-60">
+                    {previewData.prompt || '无'}
+                  </pre>
+                </div>
+
+                {/* 图片数量 */}
+                <div>
+                  <div className="text-sm font-medium text-muted-foreground mb-2">图片数量</div>
+                  <pre className="text-xs bg-muted p-3 rounded-lg">
+                    {previewData.imagesCount || 0} 张
+                  </pre>
+                </div>
+
+                {/* 额外要求 */}
+                {previewData.extraRequirements && (
+                  <div>
+                    <div className="text-sm font-medium text-muted-foreground mb-2">额外要求</div>
+                    <pre className="text-xs bg-muted p-3 rounded-lg overflow-x-auto whitespace-pre-wrap">
+                      {previewData.extraRequirements}
+                    </pre>
+                  </div>
+                )}
               </>
             )}
           </div>
