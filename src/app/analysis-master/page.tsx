@@ -33,7 +33,7 @@ import {
 } from '@/lib/analysis-master-local-helper';
 
 const ANALYSIS_MAX_VIDEO_BYTES = 100 * 1024 * 1024;
-const ANALYSIS_HELPER_DOWNLOAD_URL = '/analysis-helper/analysis-download-helper-0.1.0.zip';
+const ANALYSIS_HELPER_DOWNLOAD_URL = '/analysis-helper/analysis-download-helper-0.1.1.zip';
 
 const CHUNK_SIZE = 5 * 1024 * 1024;
 const PROJECT_PAGE_SIZE = 12;
@@ -971,7 +971,7 @@ export default function AnalysisMasterPage() {
                         <Button asChild size="sm" variant="outline" className="shrink-0 border-purple-300 bg-white text-purple-700 hover:bg-purple-100">
                           <a href={ANALYSIS_HELPER_DOWNLOAD_URL}>
                             <Download className="w-4 h-4 mr-2" />
-                            下载解析组件
+                            下载轻量解析组件
                           </a>
                         </Button>
                       </div>

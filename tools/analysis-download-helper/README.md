@@ -6,7 +6,7 @@ It solves one problem only: download a public video on the user's Windows machin
 
 ## Run locally
 
-For development, install `yt-dlp` and `ffmpeg`, then run:
+For development, install `yt-dlp`, then run:
 
 ```powershell
 python helper.py
@@ -49,7 +49,7 @@ powershell -ExecutionPolicy Bypass -File tools\analysis-download-helper\build-wi
 The build script creates:
 
 ```text
-tools/analysis-download-helper/dist/analysis-download-helper-0.1.0.zip
+tools/analysis-download-helper/dist/analysis-download-helper-0.1.1.zip
 ```
 
 The zip contains:
@@ -57,5 +57,6 @@ The zip contains:
 - `analysis-download-helper.exe`
 - `start-helper.bat`
 - `bin/yt-dlp.exe`
-- `bin/ffmpeg.exe`
 - `README.md`
+
+This lightweight package does not include `ffmpeg`. It asks `yt-dlp` to download a single file that already contains both audio and video. A small number of links may fail if the source platform only exposes separate audio and video streams.

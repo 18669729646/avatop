@@ -1,7 +1,6 @@
 param(
-  [string]$Version = "0.1.0",
-  [string]$YtDlpPath = "",
-  [string]$FfmpegPath = ""
+  [string]$Version = "0.1.1",
+  [string]$YtDlpPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,7 +30,6 @@ function Resolve-ToolPath {
 }
 
 $YtDlp = Resolve-ToolPath "yt-dlp" $YtDlpPath
-$Ffmpeg = Resolve-ToolPath "ffmpeg" $FfmpegPath
 
 Remove-Item -Recurse -Force -LiteralPath $DistRoot -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
@@ -45,7 +43,6 @@ try {
 
 Copy-Item -Recurse -Force -Path (Join-Path $Root "dist\analysis-download-helper\*") -Destination $BundleDir
 Copy-Item -LiteralPath $YtDlp -Destination (Join-Path $BinDir "yt-dlp.exe")
-Copy-Item -LiteralPath $Ffmpeg -Destination (Join-Path $BinDir "ffmpeg.exe")
 Copy-Item -LiteralPath (Join-Path $Root "README.md") -Destination (Join-Path $BundleDir "README.md")
 
 $StartScript = @'

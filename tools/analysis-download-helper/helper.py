@@ -9,7 +9,8 @@ import tempfile
 
 HOST = "127.0.0.1"
 PORT = 17321
-VERSION = "0.1.0"
+VERSION = "0.1.1"
+YTDLP_SINGLE_FILE_FORMAT = "best[ext=mp4][acodec!=none][vcodec!=none]/best[acodec!=none][vcodec!=none]/best"
 
 
 def app_dir():
@@ -76,7 +77,6 @@ def find_downloaded_file(directory):
 
 def download_video(source_url, output_dir):
     yt_dlp = resolve_tool("yt-dlp")
-    ffmpeg = resolve_tool("ffmpeg")
     if not yt_dlp:
         raise RuntimeError("解析组件缺少下载引擎，请重新安装解析组件。")
 
@@ -85,16 +85,12 @@ def download_video(source_url, output_dir):
         yt_dlp,
         "--no-playlist",
         "--no-warnings",
-        "--merge-output-format",
-        "mp4",
-    ]
-    if ffmpeg:
-        command.extend(["--ffmpeg-location", str(Path(ffmpeg).parent)])
-    command.extend([
+        "-f",
+        YTDLP_SINGLE_FILE_FORMAT,
         "--output",
         output_template,
         source_url,
-    ])
+    ]
 
     subprocess.run(
         command,
