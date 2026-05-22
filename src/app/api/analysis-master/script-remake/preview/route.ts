@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth-middleware';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { getScriptRemakePrompt, fetchImageData, refreshImageUrls } from '@/lib/analysis-master-script-remake';
+import { SCRIPT_REMAKE_JSON_SCHEMA } from '@/lib/analysis-master-script-remake';
 import type { AnalysisMasterResult } from '@/lib/analysis-master';
 
 // POST /api/analysis-master/script-remake/preview - 预览请求体（仅管理员）
@@ -121,8 +122,9 @@ export async function POST(request: NextRequest) {
         temperature: 0.3,
         topP: 0.9,
         maxOutputTokens: 32768,
-        response_mime_type: 'application/json',
       },
+      // 使用 responseSchema 确保 JSON 输出（比 response_mime_type 更可靠）
+      responseSchema: SCRIPT_REMAKE_JSON_SCHEMA,
     };
 
     // 返回预览数据
