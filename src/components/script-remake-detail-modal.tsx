@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { Copy, Download, X, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Copy, Download, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -9,7 +9,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { authFetch } from '@/lib/auth-context';
 
 interface ScriptRemakeDetail {
@@ -159,18 +158,13 @@ export function ScriptRemakeDetailModal({ scriptRemake, open, onClose }: ScriptR
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
         <DialogHeader className="flex-shrink-0">
-          <div className="flex items-center justify-between">
-            <DialogTitle className="flex items-center gap-2">
+          <DialogTitle className="flex items-center gap-2">
               <span>脚本复刻详情</span>
               <span className={`flex items-center gap-1 text-sm font-normal ${status.color}`}>
                 {status.icon}
                 {status.label}
               </span>
             </DialogTitle>
-            <Button variant="ghost" size="sm" onClick={onClose}>
-              <X className="w-4 h-4" />
-            </Button>
-          </div>
           <p className="text-xs text-muted-foreground">
             创建时间：{new Date(scriptRemake.created_at).toLocaleString('zh-CN')}
           </p>
@@ -187,7 +181,7 @@ export function ScriptRemakeDetailModal({ scriptRemake, open, onClose }: ScriptR
             <span className="text-muted-foreground">{status.label}...</span>
           </div>
         ) : (
-          <ScrollArea className="flex-1 -mx-6 px-6">
+          <div className="flex-1 overflow-y-auto -mx-6 px-6">
             <div className="space-y-4 py-2">
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-md border p-3 bg-muted/30">
@@ -331,7 +325,7 @@ export function ScriptRemakeDetailModal({ scriptRemake, open, onClose }: ScriptR
                 <div className="p-3 text-sm whitespace-pre-wrap">{scriptRemake.compliance_notes || '无'}</div>
               </div>
             </div>
-          </ScrollArea>
+          </div>
         )}
 
         {scriptRemake.status === 'completed' && (
