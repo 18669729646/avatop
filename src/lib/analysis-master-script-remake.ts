@@ -67,12 +67,58 @@ export interface ScriptRemakeSaveData {
 }
 
 function extractJsonObject(text: string): Record<string, unknown> {
-  const cleaned = text.replace(/```json|```/g, '').trim();
-  const match = cleaned.match(/\{[\s\S]*\}/);
-  if (!match) {
-    throw new Error('AI 返回内容不是有效 JSON');
+  // 先尝试直接解析
+  try {
+    return JSON.parse(text);
+  } catch {
+    // 继续尝试提取
   }
-  return JSON.parse(match[0]);
+
+  // 尝试提取 markdown 代码块中的 JSON
+  const codeBlockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  if (codeBlockMatch) {
+    try {
+      return JSON.parse(codeBlockMatch[1].trim());
+    } catch {
+      // 继续尝试
+    }
+  }
+
+  // 尝试提取最外层 JSON 对象（跳过思考内容）
+  const match = text.match(/\{[\s\S]*\}/);
+  if (match) {
+    try {
+      return JSON.parse(match[0]);
+    } catch {
+      // 继续尝试更精确的匹配
+    }
+  }
+
+  // 尝试找到最后一个完整的 JSON 对象（模型可能先输出思考再输出 JSON）
+  const allBraces: number[] = [];
+  let depth = 0;
+  let lastValidStart = -1;
+  for (let i = text.length - 1; i >= 0; i--) {
+    if (text[i] === '}') {
+      depth++;
+      if (depth === 1) allBraces.unshift(i);
+    } else if (text[i] === '{') {
+      if (depth === 1) {
+        lastValidStart = i;
+      }
+      depth--;
+      if (depth === 0 && lastValidStart !== -1) {
+        try {
+          return JSON.parse(text.slice(lastValidStart, allBraces[0] + 1));
+        } catch {
+          allBraces.shift();
+          lastValidStart = -1;
+        }
+      }
+    }
+  }
+
+  throw new Error('AI 返回内容不是有效 JSON');
 }
 
 export async function getScriptRemakePrompt(context: {
@@ -137,7 +183,8 @@ export async function fetchImageData(url: string): Promise<Buffer | null> {
 
 export async function generateScriptRemake(
   input: ScriptRemakeInput,
-  options: ScriptRemakeOptions = {}
+  options: ScriptRemakeOptions = {},
+  scriptRemakeId?: string
 ): Promise<ScriptRemakeResult> {
   if (!input.analysisResult || !input.product) {
     throw new Error('参数不完整');
@@ -206,6 +253,10 @@ export async function generateScriptRemake(
         maxOutputTokens: 32768,
         response_mime_type: 'application/json',
       },
+      // 禁用思考模式，确保直接返回 JSON 结果
+      thinkingConfig: {
+        thinkingBudget: 0,
+      },
     }),
     signal: AbortSignal.timeout(10 * 60 * 1000),
   });
@@ -218,8 +269,27 @@ export async function generateScriptRemake(
 
   const result = await response.json();
   const text = result.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  console.log(`[Script Remake] AI 返回内容长度: ${text.length}, 内容预览: ${text.slice(0, 500)}`);
-  const rawResult = extractJsonObject(text);
+  console.log(`[Script Remake] AI 返回内容长度: ${text.length}`);
+  console.log(`[Script Remake] AI 返回内容全文: ${text}`);
+
+  let rawResult: Record<string, unknown>;
+  try {
+    rawResult = extractJsonObject(text);
+  } catch (parseError) {
+    console.error(`[Script Remake] JSON 解析失败，原始内容已记录，长度: ${text.length}`);
+    // 将原始返回存储到数据库，便于排查
+    try {
+      const { getSupabaseClient } = await import('@/storage/database/supabase-client');
+      const supabase = getSupabaseClient();
+      await supabase
+        .from('analysis_master_script_remakes')
+        .update({ raw_result: text, error: 'AI 返回内容不是有效 JSON，原始内容已保存' })
+        .eq('id', scriptRemakeId);
+    } catch (dbError) {
+      console.error('[Script Remake] 保存原始返回失败:', dbError);
+    }
+    throw parseError;
+  }
 
   return normalizeScriptRemakeResult(rawResult);
 }

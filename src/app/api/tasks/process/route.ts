@@ -2202,7 +2202,7 @@ async function executeScriptRemakeTask(task: QueueTask, supabase: ReturnType<typ
     }),
   };
 
-  const result = await generateScriptRemake({ analysisResult, product, language, includeChinese });
+  const result = await generateScriptRemake({ analysisResult, product, language, includeChinese }, {}, params.scriptRemakeId);
   const now = new Date().toISOString();
 
   const scriptActionType = params.actionType === ANALYSIS_MASTER_SCRIPT_REMAKE_ACTION_TYPE
