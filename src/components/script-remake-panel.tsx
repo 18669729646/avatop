@@ -92,6 +92,8 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState('en-US');
+  const [retryCount, setRetryCount] = useState(0);
+  const [currentScriptRemakeId, setCurrentScriptRemakeId] = useState<string | null>(null);
 
   const canGenerate = selectedProject?.status === 'completed' &&
                       selectedProject?.result &&
@@ -105,72 +107,117 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
     setCurrentTaskId(null);
   };
 
-  const pollScriptRemakeStatus = async (taskId: string, maxAttempts = 60): Promise<ScriptRemakeResult | null> => {
-    for (let i = 0; i < maxAttempts; i++) {
-      await new Promise(resolve => setTimeout(resolve, 2000));
+  // 轮询配置：5分钟超时，间隔2秒，最大150次
+  const POLL_INTERVAL_MS = 2000;
+  const MAX_POLL_ATTEMPTS = 150;
+  const MAX_AUTO_RETRY = 5;
 
-      try {
-        const response = await authFetch(`/api/analysis-master/script-remake?id=${taskId}`, {
-          method: 'GET',
-        });
+  const pollScriptRemakeStatus = async (
+    scriptRemakeId: string,
+    onProgress: (attempt: number, retry: number) => void
+  ): Promise<ScriptRemakeResult | { status: 'timeout' | 'failed'; error?: string; scriptRemakeId?: string } | null> => {
+    let retry = 0;
 
-        const result = await response.json();
-        if (result.success && result.data) {
-          const data = result.data;
-          if (data.status === 'completed') {
-            const segments = Array.isArray(data.segments) ? data.segments : [];
-            
-            return {
-              id: data.id,
-              projectId: data.project_id,
-              productId: data.product_id,
-              title: data.title || '',
-              hook: data.hook || '',
-              painPoint: data.pain_point || '',
-              sellingPointScript: data.selling_point_script || '',
-              cta: data.cta || '',
-              fullScript: data.full_script || '',
-              fullScriptCn: data.full_script_cn || '',
-              segments: segments.map((seg: Record<string, unknown>, index: number) => ({
-                order: typeof seg.order === 'number' ? seg.order : index + 1,
-                durationSec: typeof seg.durationSec === 'number' ? seg.durationSec : 8,
-                scene: String(seg.scene || ''),
-                voiceover: String(seg.voiceover || ''),
-                voiceoverCn: String(seg.voiceoverCn || seg.voiceover_cn || ''),
-                action: String(seg.action || ''),
-                productPlacement: String(seg.productPlacement || ''),
-                camera: String(seg.camera || ''),
-                onScreenText: String(seg.onScreenText || ''),
-                onScreenTextCn: String(seg.onScreenTextCn || seg.onScreenText_cn || ''),
-              })),
-              shootingNotes: data.shooting_notes || '',
-              visualNotes: data.visual_notes || '',
-              complianceNotes: data.compliance_notes || '',
-            };
-          } else if (data.status === 'failed') {
-            throw new Error(data.error || '脚本生成失败');
+    while (retry <= MAX_AUTO_RETRY) {
+      for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
+        onProgress(attempt, retry);
+
+        await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+
+        try {
+          const response = await authFetch(`/api/analysis-master/script-remake?id=${scriptRemakeId}`, {
+            method: 'GET',
+          });
+
+          const result = await response.json();
+          if (result.success && result.data) {
+            const data = result.data;
+            if (data.status === 'completed') {
+              const segments = Array.isArray(data.segments) ? data.segments : [];
+
+              return {
+                id: data.id,
+                projectId: data.project_id,
+                productId: data.product_id,
+                title: data.title || '',
+                hook: data.hook || '',
+                painPoint: data.pain_point || '',
+                sellingPointScript: data.selling_point_script || '',
+                cta: data.cta || '',
+                fullScript: data.full_script || '',
+                fullScriptCn: data.full_script_cn || '',
+                segments: segments.map((seg: Record<string, unknown>, index: number) => ({
+                  order: typeof seg.order === 'number' ? seg.order : index + 1,
+                  durationSec: typeof seg.durationSec === 'number' ? seg.durationSec : 8,
+                  scene: String(seg.scene || ''),
+                  voiceover: String(seg.voiceover || ''),
+                  voiceoverCn: String(seg.voiceoverCn || seg.voiceover_cn || ''),
+                  action: String(seg.action || ''),
+                  productPlacement: String(seg.productPlacement || ''),
+                  camera: String(seg.camera || ''),
+                  onScreenText: String(seg.onScreenText || ''),
+                  onScreenTextCn: String(seg.onScreenTextCn || seg.onScreenText_cn || ''),
+                })),
+                shootingNotes: data.shooting_notes || '',
+                visualNotes: data.visual_notes || '',
+                complianceNotes: data.compliance_notes || '',
+              };
+            } else if (data.status === 'failed') {
+              return { status: 'failed', error: data.error || '脚本生成失败', scriptRemakeId };
+            }
           }
+        } catch (err) {
+          console.error(`[Script Remake Panel] 轮询失败: ${(err as Error).message}`);
         }
-      } catch (err) {
-        console.error(`[Script Remake Panel] 轮询失败: ${(err as Error).message}`);
       }
 
-      setGenerating(true);
+      // 单次轮询超时，自动重试
+      retry++;
+      if (retry <= MAX_AUTO_RETRY) {
+        console.log(`[Script Remake Panel] 第${retry}次自动重试...`);
+        setRetryCount(retry);
+      }
     }
 
-    return null;
+    return { status: 'timeout', scriptRemakeId };
   };
 
-  const handleGenerate = async () => {
+  // 进度状态
+  const [pollProgress, setPollProgress] = useState({ attempt: 0, retry: 0 });
+
+  const handleGenerate = async (manualRetryScriptId?: string) => {
     if (!selectedProject?.id || !selectedProduct) return;
 
     setLoading(true);
     setGenerating(true);
     setError('');
     setScriptRemakeResult(null);
-    setCurrentTaskId(null);
+    setRetryCount(0);
+    setPollProgress({ attempt: 0, retry: 0 });
 
     try {
+      // 如果是手动重试，直接用之前的 scriptRemakeId 轮询
+      if (manualRetryScriptId) {
+        setCurrentScriptRemakeId(manualRetryScriptId);
+        setCurrentTaskId(`sr-task-${manualRetryScriptId}`);
+
+        const result = await pollScriptRemakeStatus(manualRetryScriptId, (attempt, retry) => {
+          setPollProgress({ attempt, retry });
+          setRetryCount(retry);
+          setGenerating(true);
+        });
+
+        if (result && 'id' in result) {
+          setScriptRemakeResult(result);
+        } else if (result && result.status === 'failed') {
+          setError(result.error || '脚本生成失败');
+        } else {
+          setError('脚本生成超时，已达最大重试次数');
+        }
+        setLoading(false);
+        return;
+      }
+
       const response = await authFetch('/api/analysis-master/script-remake', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -186,24 +233,39 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
       if (!result.success) {
         setError(result.error || '脚本生成失败');
         setGenerating(false);
+        setLoading(false);
         return;
       }
 
       const taskId = result.data.taskId;
+      const scriptRemakeId = result.data.scriptRemakeId;
       setCurrentTaskId(taskId);
+      setCurrentScriptRemakeId(scriptRemakeId);
 
-      const scriptResult = await pollScriptRemakeStatus(taskId);
+      const pollResult = await pollScriptRemakeStatus(scriptRemakeId, (attempt, retry) => {
+        setPollProgress({ attempt, retry });
+        setRetryCount(retry);
+        setGenerating(true);
+      });
 
-      if (scriptResult) {
-        setScriptRemakeResult(scriptResult);
+      if (pollResult && 'id' in pollResult) {
+        setScriptRemakeResult(pollResult);
+      } else if (pollResult && pollResult.status === 'failed') {
+        setError(pollResult.error || '脚本生成失败');
       } else {
-        setError('脚本生成超时，请稍后刷新查看');
+        setError('脚本生成超时，已达最大重试次数');
       }
     } catch (err) {
       setError((err as Error).message || '脚本生成失败');
     } finally {
       setLoading(false);
-      setGenerating(false);
+    }
+  };
+
+  // 手动重试
+  const handleManualRetry = () => {
+    if (currentScriptRemakeId) {
+      handleGenerate(currentScriptRemakeId);
     }
   };
 
@@ -321,7 +383,19 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
                   )}
 
                   {error && (
-                    <div className="text-sm text-destructive bg-destructive/10 rounded-md p-3">{error}</div>
+                    <div className="space-y-2">
+                      <div className="text-sm text-destructive bg-destructive/10 rounded-md p-3">{error}</div>
+                      {currentScriptRemakeId && (
+                        <Button
+                          onClick={handleManualRetry}
+                          variant="outline"
+                          className="w-full"
+                        >
+                          <Sparkles className="w-4 h-4 mr-2" />
+                          手动重试
+                        </Button>
+                      )}
+                    </div>
                   )}
 
                   {!scriptRemakeResult ? (
@@ -345,14 +419,19 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
                           </Select>
                         </div>
                         <Button
-                          onClick={handleGenerate}
+                          onClick={() => handleGenerate()}
                           disabled={loading || !canGenerate}
                           className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
                         >
-                          {loading || generating ? (
+                          {loading ? (
                             <>
                               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                              {generating ? 'AI生成中，请稍候...' : '提交任务...'}
+                              提交任务...
+                            </>
+                          ) : generating ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              生成中 ({Math.floor(pollProgress.attempt * 2)}s){retryCount > 0 && ` - 重试${retryCount}/${MAX_AUTO_RETRY}`}
                             </>
                           ) : (
                             <>
@@ -363,8 +442,16 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
                         </Button>
                       </div>
                       {generating && (
-                        <div className="text-xs text-muted-foreground text-center">
-                          任务已提交，后台生成中，请勿关闭页面
+                        <div className="space-y-1">
+                          <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                            <div
+                              className="bg-gradient-to-r from-purple-600 to-pink-600 h-full transition-all duration-1000"
+                              style={{ width: `${Math.min((pollProgress.attempt / MAX_POLL_ATTEMPTS) * 100, 100)}%` }}
+                            />
+                          </div>
+                          <div className="text-xs text-muted-foreground text-center">
+                            任务已提交，后台生成中{retryCount > 0 && `（自动重试第${retryCount}次）`}，请勿关闭页面
+                          </div>
                         </div>
                       )}
                     </>
