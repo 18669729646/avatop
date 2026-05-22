@@ -132,6 +132,30 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
             hasSegments: segments.length > 0
           });
           
+          // 从 productSnapshot 恢复 selectedProduct
+          if (latestScript.product_snapshot) {
+            const ps = latestScript.product_snapshot;
+            const allImages = Array.isArray(ps.images) 
+              ? ps.images.map((img: { key?: string; url?: string }, idx: number) => ({
+                  key: img.key || `image-${idx}`,
+                  url: img.url || '',
+                }))
+              : [];
+            setSelectedProduct({
+              id: ps.id || latestScript.product_id,
+              name: ps.name || '',
+              description: ps.description || '',
+              sellingPoints: Array.isArray(ps.selling_points) ? ps.selling_points : [],
+              targetAudience: ps.target_audience || '',
+              usageScenarios: ps.usage_scenarios || '',
+              brandInfo: ps.brand_info || '',
+              priceRange: ps.price_range || '',
+              keywords: Array.isArray(ps.keywords) ? ps.keywords : [],
+              primaryImage: allImages.length > 0 ? allImages[0].url : '',
+              allImages,
+            });
+          }
+          
           setScriptRemakeResult({
             id: latestScript.id,
             projectId: latestScript.projectId,
