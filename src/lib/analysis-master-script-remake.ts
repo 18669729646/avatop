@@ -32,6 +32,8 @@ export interface ScriptRemakeResult {
   shootingNotes: string;
   visualNotes: string;
   complianceNotes: string;
+  /** 原始返回数据，用于调试和问题排查 */
+  rawResult?: Record<string, unknown>;
 }
 
 export interface ScriptRemakeInput {
@@ -379,9 +381,13 @@ export async function generateScriptRemake(
   }
   
   console.log(`[Script Remake] AI 返回类型: ${typeof scriptRemakeData}, keys: ${Object.keys(scriptRemakeData).join(', ')}`);
-  console.log(`[Script Remake] AI 返回体预览: ${JSON.stringify(scriptRemakeData).slice(0, 200)}...`);
+  console.log(`[Script Remake] AI 返回体预览: ${JSON.stringify(scriptRemakeData).slice(0, 500)}...`);
 
-  return normalizeScriptRemakeResult(scriptRemakeData);
+  const normalized = normalizeScriptRemakeResult(scriptRemakeData);
+  // 添加原始返回数据用于调试
+  normalized.rawResult = scriptRemakeData;
+
+  return normalized;
 }
 
 export function normalizeScriptRemakeResult(raw: Record<string, unknown>): ScriptRemakeResult {

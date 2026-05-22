@@ -2203,7 +2203,32 @@ async function executeScriptRemakeTask(task: QueueTask, supabase: ReturnType<typ
     imageKeys: productAllImages.map(img => typeof img === 'string' ? '' : (img.key || '')),
   };
 
-  const result = await generateScriptRemake({ analysisResult, product, language, includeChinese }, {}, params.scriptRemakeId);
+  let result: Awaited<ReturnType<typeof generateScriptRemake>>;
+  let rawApiResponse: Record<string, unknown> | null = null;
+
+  try {
+    result = await generateScriptRemake({ analysisResult, product, language, includeChinese }, {}, params.scriptRemakeId);
+    rawApiResponse = result.rawResult || null;
+  } catch (error) {
+    // 尝试获取原始返回以便保存到数据库
+    console.error(`[Script Remake] 执行失败: ${(error as Error).message}`);
+    
+    // 更新失败状态，同时保存原始返回（如果有）
+    const now = new Date().toISOString();
+    await supabase
+      .from('analysis_master_script_remakes')
+      .update({
+        status: 'failed',
+        error: (error as Error).message,
+        raw_result: rawApiResponse,
+        updated_at: now,
+      })
+      .eq('id', scriptRemakeId)
+      .eq('user_id', task.user_id);
+    
+    throw error;
+  }
+
   const now = new Date().toISOString();
 
   const scriptActionType = params.actionType === ANALYSIS_MASTER_SCRIPT_REMAKE_ACTION_TYPE
@@ -2254,6 +2279,7 @@ async function executeScriptRemakeTask(task: QueueTask, supabase: ReturnType<typ
       shooting_notes: result.shootingNotes,
       visual_notes: result.visualNotes,
       compliance_notes: result.complianceNotes,
+      raw_result: result.rawResult || null,
       error: null,
       updated_at: now,
     })

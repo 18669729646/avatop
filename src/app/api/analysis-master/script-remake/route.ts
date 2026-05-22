@@ -132,6 +132,7 @@ export async function GET(request: NextRequest) {
           visual_notes: item.visual_notes,
           compliance_notes: item.compliance_notes,
           error: item.error,
+          raw_result: item.raw_result, // 原始返回数据
           created_at: item.created_at,
           updated_at: item.updated_at,
         },
@@ -185,6 +186,7 @@ export async function GET(request: NextRequest) {
       product_snapshot: item.product_snapshot,
       analysis_snapshot: item.analysis_snapshot,
       error: item.error,
+      raw_result: item.raw_result, // 原始返回数据
       created_at: item.created_at,
       updated_at: item.updated_at,
     }));
