@@ -68,6 +68,7 @@ function getPromptType(request: NextRequest): PromptType {
   const type = url.searchParams.get('type');
   if (type === 'analysis_master') return 'analysis_master';
   if (type === 'video_remake') return 'video_remake';
+  if (type === 'analysis_master_script_remake') return 'analysis_master_script_remake';
   return 'shortfilm';
 }
 
