@@ -101,12 +101,19 @@ export async function createAnalysisProjectFromLink(
 
   const projectId = createAnalysisProjectId();
   console.log(`[AnalysisProject] 开始下载视频，projectId=${projectId}`);
-  const downloaded = await download(sourceUrl, {
-    projectId,
-    provider: 'auto',
-    maxBytes: ANALYSIS_MAX_VIDEO_BYTES,
-    timeoutMs: params.downloadTimeoutMs,
-  });
+  let downloaded;
+  try {
+    downloaded = await download(sourceUrl, {
+      projectId,
+      provider: 'auto',
+      maxBytes: ANALYSIS_MAX_VIDEO_BYTES,
+      timeoutMs: params.downloadTimeoutMs,
+    });
+  } catch (downloadError) {
+    const errMsg = downloadError instanceof Error ? downloadError.message : String(downloadError);
+    console.error(`[AnalysisProject] 视频下载失败，projectId=${projectId}, url=${sourceUrl}, error=${errMsg}`);
+    throw new AnalysisMasterProjectError(`视频下载失败：${errMsg}`, 400);
+  }
   console.log(`[AnalysisProject] 视频下载成功，size=${downloaded.buffer.length}, provider=${downloaded.provider}`);
 
   const storageCheck = await storageQuota(params.userId, downloaded.buffer.length);
