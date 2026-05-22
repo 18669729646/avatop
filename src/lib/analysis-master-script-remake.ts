@@ -323,22 +323,28 @@ export async function generateScriptRemake(
 
   console.log(`[Script Remake] 调用模型: ${model}, 提示词长度: ${prompt.length}, 图片数量: ${imageBuffers.length}`);
 
+  const requestBody = {
+    contents: [{ parts }],
+    generationConfig: {
+      temperature: 0.3,
+      topP: 0.9,
+      maxOutputTokens: 32768,
+      responseMimeType: 'application/json',
+      responseSchema: SCRIPT_REMAKE_JSON_SCHEMA,
+    },
+  };
+
+  // 记录请求体中的关键配置（调试用）
+  console.log(`[Script Remake] 请求体 generationConfig: ${JSON.stringify(requestBody.generationConfig)}`);
+  console.log(`[Script Remake] responseSchema 是否存在: ${!!SCRIPT_REMAKE_JSON_SCHEMA}, type: ${typeof SCRIPT_REMAKE_JSON_SCHEMA}`);
+
   const response = await fetch(`${basePath}/models/${model}:generateContent`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'x-goog-api-key': apiConfig.apiKey,
     },
-    body: JSON.stringify({
-      contents: [{ parts }],
-      generationConfig: {
-        temperature: 0.3,
-        topP: 0.9,
-        maxOutputTokens: 32768,
-        responseMimeType: 'application/json',
-        responseSchema: SCRIPT_REMAKE_JSON_SCHEMA,
-      },
-    }),
+    body: JSON.stringify(requestBody),
     signal: AbortSignal.timeout(10 * 60 * 1000),
   });
 
@@ -350,8 +356,17 @@ export async function generateScriptRemake(
 
   const result = await response.json();
   
-  // 记录 Gemini 完整返回结构（调试用）
-  console.log(`[Script Remake] Gemini 返回结构: ${JSON.stringify(result).slice(0, 500)}...`);
+  // 记录 Gemini 完整返回结构（调试用），写入单独文件避免日志截断
+  console.log(`[Script Remake] Gemini 返回结构 (前2000字符): ${JSON.stringify(result).slice(0, 2000)}`);
+  
+  // 将完整返回写入临时文件
+  try {
+    const fs = await import('fs');
+    fs.writeFileSync('/tmp/script-remake-gemini-response.json', JSON.stringify(result, null, 2));
+    console.log('[Script Remake] 完整返回已写入 /tmp/script-remake-gemini-response.json');
+  } catch (e) {
+    console.warn('[Script Remake] 写入临时文件失败:', (e as Error).message);
+  }
   
   // 提取返回数据 - 兼容 responseSchema 的多种返回格式
   let scriptRemakeData: Record<string, unknown> = {};
@@ -393,8 +408,8 @@ export async function generateScriptRemake(
   console.log(`[Script Remake] AI 返回类型: ${typeof scriptRemakeData}, keys: ${Object.keys(scriptRemakeData).join(', ')}`);
   console.log(`[Script Remake] AI 返回体预览: ${JSON.stringify(scriptRemakeData).slice(0, 500)}...`);
 
+  // 即使解析失败也保存原始返回
   const normalized = normalizeScriptRemakeResult(scriptRemakeData);
-  // 添加原始返回数据用于调试
   normalized.rawResult = scriptRemakeData;
 
   return normalized;
