@@ -79,6 +79,7 @@ export async function POST(request: NextRequest) {
           key: img.key,
           url: img.url,
         })),
+        imageKeys: (productSnapshot.images || []).map((img: { key: string }) => img.key),
       },
       language: language || 'en-US',
       includeChinese: includeChinese !== false,

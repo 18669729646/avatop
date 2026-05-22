@@ -2200,6 +2200,7 @@ async function executeScriptRemakeTask(task: QueueTask, supabase: ReturnType<typ
       if (typeof img === 'string') return { key: '', url: img };
       return { key: img.key || '', url: img.url || '' };
     }),
+    imageKeys: productAllImages.map(img => typeof img === 'string' ? '' : (img.key || '')),
   };
 
   const result = await generateScriptRemake({ analysisResult, product, language, includeChinese }, {}, params.scriptRemakeId);

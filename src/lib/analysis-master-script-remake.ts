@@ -3,6 +3,7 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { PROMPT_TYPE_CONFIGS, replaceVariables } from '@/lib/prompt-variables';
 import type { ProductSelection } from '@/lib/products';
 import type { AnalysisMasterResult } from '@/lib/analysis-master';
+import { s3Storage } from '@/lib/s3-client';
 
 export const ANALYSIS_MASTER_SCRIPT_REMAKE_ACTION_TYPE = 'analysis_master_script_remake';
 
@@ -194,6 +195,26 @@ export async function fetchImageData(url: string): Promise<Buffer | null> {
   }
 }
 
+/**
+ * 重新生成 S3 预签名 URL（因为预签名 URL 可能已过期）
+ */
+async function refreshImageUrls(keys: string[], maxImages: number): Promise<{ url: string; key: string }[]> {
+  const freshImages: { url: string; key: string }[] = [];
+  const keysToFetch = keys.slice(0, maxImages);
+
+  for (const key of keysToFetch) {
+    try {
+      // 7天过期
+      const url = await s3Storage.generatePresignedUrl({ key, expireTime: 7 * 24 * 60 * 60 });
+      freshImages.push({ url, key });
+    } catch (error) {
+      console.warn(`[Script Remake] 刷新预签名 URL 失败: ${key}, error: ${(error as Error).message}`);
+    }
+  }
+
+  return freshImages;
+}
+
 export async function generateScriptRemake(
   input: ScriptRemakeInput,
   options: ScriptRemakeOptions = {},
@@ -209,9 +230,18 @@ export async function generateScriptRemake(
   }
 
   const maxImages = options.maxImages ?? 5;
-  const productImages = input.product.allImages.slice(0, maxImages);
-  const imageBuffers: Buffer[] = [];
+  let productImages = input.product.allImages.slice(0, maxImages);
 
+  // 如果预签名 URL 已过期，尝试重新生成
+  if (productImages.length > 0 && input.product.imageKeys && input.product.imageKeys.length > 0) {
+    const freshUrls = await refreshImageUrls(input.product.imageKeys, maxImages);
+    if (freshUrls.length > 0) {
+      productImages = freshUrls;
+      console.log(`[Script Remake] 刷新了 ${freshUrls.length} 个预签名 URL`);
+    }
+  }
+
+  const imageBuffers: Buffer[] = [];
   for (const img of productImages) {
     const buffer = await fetchImageData(img.url);
     if (buffer) {
@@ -530,9 +560,24 @@ export async function enqueueScriptRemakeTask(params: {
 
   const now = new Date().toISOString();
   const analysisResult = project.result as Record<string, unknown>;
+  // 将 images 数组转换为 allImages 格式（key, url）
+  // images 格式: {key: string, url: string}[]
+  const rawImages = product.images as { key: string; url: string }[] | string[] | undefined;
+  const allImages: { key: string; url: string }[] = (rawImages || []).map((img, idx) => {
+    if (typeof img === 'string') {
+      // 兼容旧格式：字符串直接作为 URL
+      return { key: `img-${idx}`, url: img };
+    }
+    return { key: img.key || `img-${idx}`, url: img.url || '' };
+  });
+  // 添加 S3 key，用于任务处理时重新生成预签名 URL
+  const imageKeys = allImages.map(img => img.key);
   const productSnapshot = {
     ...product,
+    allImages,
+    primaryImage: allImages[0] || null,
     sellingPoints: product.selling_points || [],
+    imageKeys, // 存储 S3 key 数组
   };
 
   const scriptRemakeId = createScriptRemakeId();

@@ -53,6 +53,7 @@ export interface ProductSelection {
   keywords: string[];
   primaryImage: string; // 主图 URL
   allImages: Array<{ key: string; url: string }>; // 所有图片（key + url）
+  imageKeys: string[]; // 仅 S3 key 列表（用于重新生成预签名 URL）
 }
 
 const MAX_IMAGES_PER_PRODUCT = 20;
@@ -476,6 +477,7 @@ export async function getProductSelection(productId: string): Promise<ProductSel
     keywords: product.keywords,
     primaryImage: primaryImage?.url || '',
     allImages: product.images.map(img => ({ key: img.key, url: img.url })),
+    imageKeys: product.images.map(img => img.key),
   };
 }
 

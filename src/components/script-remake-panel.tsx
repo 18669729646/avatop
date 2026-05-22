@@ -165,7 +165,7 @@ export function ScriptRemakePanel({ selectedProject, isAdmin = false }: ScriptRe
           if (latestScript.product_snapshot) {
             const ps = latestScript.product_snapshot;
             const allImages = Array.isArray(ps.images) 
-              ? ps.images.map((img: { key?: string; url?: string }, idx: number) => ({
+              ? (ps.images as Array<{ key?: string; url?: string }>).map((img, idx) => ({
                   key: img.key || `image-${idx}`,
                   url: img.url || '',
                 }))
@@ -182,6 +182,7 @@ export function ScriptRemakePanel({ selectedProject, isAdmin = false }: ScriptRe
               keywords: Array.isArray(ps.keywords) ? ps.keywords : [],
               primaryImage: allImages.length > 0 ? allImages[0].url : '',
               allImages,
+              imageKeys: allImages.map(img => img.key || ''),
             });
           }
           
