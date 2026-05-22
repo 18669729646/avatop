@@ -108,6 +108,12 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
         method: 'GET',
       });
       const result = await response.json();
+      console.log('[Script Remake Panel] 加载已有脚本响应:', {
+        success: result.success,
+        hasData: !!result.data,
+        dataLength: result.data?.length,
+        firstItem: result.data?.[0]
+      });
       
       if (result.success && result.data && result.data.length > 0) {
         // 取最新的一个
@@ -119,6 +125,12 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
         
         if (latestScript.status === 'completed') {
           const segments = Array.isArray(latestScript.segments) ? latestScript.segments : [];
+          
+          console.log('[Script Remake Panel] 设置脚本结果:', {
+            id: latestScript.id,
+            title: latestScript.title,
+            hasSegments: segments.length > 0
+          });
           
           setScriptRemakeResult({
             id: latestScript.id,
