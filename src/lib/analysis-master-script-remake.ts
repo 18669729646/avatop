@@ -350,6 +350,9 @@ export async function generateScriptRemake(
 
   const result = await response.json();
   
+  // 记录 Gemini 完整返回结构（调试用）
+  console.log(`[Script Remake] Gemini 返回结构: ${JSON.stringify(result).slice(0, 500)}...`);
+  
   // 提取返回数据 - 兼容 responseSchema 的多种返回格式
   let scriptRemakeData: Record<string, unknown> = {};
   
@@ -359,17 +362,24 @@ export async function generateScriptRemake(
     if (content && content.parts && content.parts[0]) {
       const part0 = content.parts[0];
       
-      // 格式1: parts[0] 直接是 JSON 对象（responseSchema 常用格式）
-      if (part0.title || part0.hook || part0.segments) {
+      // 格式1: parts[0].text 是 JSON 字符串（responseSchema + responseMimeType 的标准返回格式）
+      if (typeof part0.text === 'string') {
+        try {
+          scriptRemakeData = JSON.parse(part0.text);
+        } catch {
+          scriptRemakeData = extractJsonObject(part0.text);
+        }
+      }
+      // 格式2: parts[0] 直接是 JSON 对象
+      else if (part0.title || part0.hook || part0.segments) {
         scriptRemakeData = part0;
       }
-      // 格式2: parts[0] 包含嵌套的 parts 数组
+      // 格式3: parts[0] 包含嵌套的 parts 数组
       else if (part0.parts && part0.parts[0]) {
         const nestedPart = part0.parts[0];
         if (nestedPart.title || nestedPart.hook || nestedPart.segments) {
           scriptRemakeData = nestedPart;
         } else if (typeof nestedPart.text === 'string') {
-          // 格式3: text 字段包含 JSON 字符串
           try {
             scriptRemakeData = JSON.parse(nestedPart.text);
           } catch {
