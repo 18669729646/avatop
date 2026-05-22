@@ -62,7 +62,15 @@ export async function POST(request: NextRequest) {
     }
 
     const workbook = createAnalysisMasterWorkbook(rows);
-    const filename = `analysis-master-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.xlsx`;
+    const dateStr = new Date().toISOString().slice(0, 10);
+    let filename: string;
+    if (projectIds.length === 1 && data && data.length === 1) {
+      const singleName = String((data[0] as Record<string, unknown>).name || '未命名项目');
+      const safeName = singleName.replace(/[\\/:*?"<>|]/g, '_').slice(0, 50);
+      filename = `${dateStr}_${safeName}_反推脚本.xlsx`;
+    } else {
+      filename = `${dateStr}_反推脚本批量导出.xlsx`;
+    }
     return new NextResponse(new Uint8Array(workbook), {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

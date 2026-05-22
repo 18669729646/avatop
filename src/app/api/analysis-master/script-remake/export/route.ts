@@ -142,8 +142,9 @@ export async function POST(request: NextRequest) {
     XLSX.utils.book_append_sheet(workbook, worksheet, '脚本复刻');
     const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 
-    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const filename = `script-remake-${dateStr}.xlsx`;
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const safeName = projectName.replace(/[\\/:*?"<>|]/g, '_').slice(0, 50);
+    const filename = `${dateStr}_${safeName}_脚本复刻.xlsx`;
 
     return new NextResponse(buffer, {
       headers: {

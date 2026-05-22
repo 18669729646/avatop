@@ -1117,7 +1117,6 @@ export default function AnalysisMasterPage() {
                              remakeStatuses[project.id].status === 'completed' ? `脚本复刻: ${remakeStatuses[project.id].title || '已完成'}` :
                              '脚本复刻: 失败'}
                           </span>
-                          <span className="text-muted-foreground ml-auto">查看</span>
                         </button>
                       )}
                       <div className="flex items-center justify-end gap-2 mt-2">

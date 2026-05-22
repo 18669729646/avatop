@@ -98,14 +98,14 @@ export const SCRIPT_REMAKE_JSON_SCHEMA = {
           onScreenText: { type: "string", description: "屏幕文字（英文）" },
           onScreenTextCn: { type: "string", description: "屏幕文字（中文）" }
         },
-        required: ["order", "durationSec", "scene", "action", "productPlacement", "camera"]
+        required: ["order", "durationSec", "scene", "voiceover", "voiceoverCn", "action", "productPlacement", "camera"]
       }
     },
     shootingNotes: { type: "string", description: "拍摄建议" },
     visualNotes: { type: "string", description: "视觉风格说明" },
     complianceNotes: { type: "string", description: "合规注意事项" }
   },
-  required: ["title", "hook", "segments"]
+  required: ["title", "hook", "fullScript", "fullScriptCn", "segments"]
 };
 
 function extractJsonObject(text: string): Record<string, unknown> {

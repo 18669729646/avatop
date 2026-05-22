@@ -27,10 +27,12 @@ interface ScriptRemakeDetail {
     durationSec: number;
     scene: string;
     voiceover: string;
+    voiceoverCn?: string;
     action: string;
     productPlacement: string;
     camera: string;
     onScreenText: string;
+    onScreenTextCn?: string;
   }>;
   product_analysis?: {
     productCategory: string;
@@ -44,6 +46,7 @@ interface ScriptRemakeDetail {
   shooting_notes?: string;
   visual_notes?: string;
   compliance_notes?: string;
+  full_script_cn?: string;
   error?: string;
   created_at: string;
 }
@@ -82,7 +85,9 @@ export function ScriptRemakeDetailModal({ scriptRemake, open, onClose }: ScriptR
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `script-remake-${scriptRemake.id.slice(-8)}.xlsx`;
+      const disposition = response.headers.get('content-disposition') || '';
+      const serverFilename = disposition.match(/filename="([^"]+)"/)?.[1];
+      a.download = serverFilename || `script-remake-${scriptRemake.id.slice(-8)}.xlsx`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -244,6 +249,24 @@ export function ScriptRemakeDetailModal({ scriptRemake, open, onClose }: ScriptR
                 <div className="p-3 text-sm whitespace-pre-wrap">{scriptRemake.full_script}</div>
               </div>
 
+              {scriptRemake.full_script_cn && (
+                <div className="rounded-md border">
+                  <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/50">
+                    <span className="text-xs font-medium text-muted-foreground">完整口播（中文版）</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 text-xs"
+                      onClick={() => handleCopy(scriptRemake.full_script_cn || '', 'fullScriptCn')}
+                    >
+                      {copiedField === 'fullScriptCn' ? <CheckCircle2 className="w-3 h-3 mr-1" /> : <Copy className="w-3 h-3 mr-1" />}
+                      {copiedField === 'fullScriptCn' ? '已复制' : '复制'}
+                    </Button>
+                  </div>
+                  <div className="p-3 text-sm whitespace-pre-wrap">{scriptRemake.full_script_cn}</div>
+                </div>
+              )}
+
               {(scriptRemake.segments || []).length > 0 && (
                 <div className="rounded-md border">
                   <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/50">
@@ -270,10 +293,16 @@ export function ScriptRemakeDetailModal({ scriptRemake, open, onClose }: ScriptR
                         <div className="grid grid-cols-2 gap-2 text-sm">
                           <div><span className="text-muted-foreground">画面：</span>{seg.scene}</div>
                           <div><span className="text-muted-foreground">口播：</span>{seg.voiceover}</div>
+                          {seg.voiceoverCn && (
+                            <div className="col-span-2"><span className="text-muted-foreground">口播（中文）：</span>{seg.voiceoverCn}</div>
+                          )}
                           <div><span className="text-muted-foreground">动作：</span>{seg.action}</div>
                           <div><span className="text-muted-foreground">镜头：</span>{seg.camera}</div>
                           {seg.onScreenText && (
                             <div className="col-span-2"><span className="text-muted-foreground">屏幕文字：</span>{seg.onScreenText}</div>
+                          )}
+                          {seg.onScreenTextCn && (
+                            <div className="col-span-2"><span className="text-muted-foreground">屏幕文字（中文）：</span>{seg.onScreenTextCn}</div>
                           )}
                         </div>
                       </div>

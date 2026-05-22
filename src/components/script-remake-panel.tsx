@@ -546,7 +546,9 @@ export function ScriptRemakePanel({ selectedProject, isAdmin = false }: ScriptRe
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `script-remake-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.xlsx`;
+      const disposition = response.headers.get('content-disposition') || '';
+      const serverFilename = disposition.match(/filename="([^"]+)"/)?.[1];
+      a.download = serverFilename || `script-remake-${new Date().toISOString().slice(0, 10)}.xlsx`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
