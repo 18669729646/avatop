@@ -112,6 +112,11 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
       if (result.success && result.data && result.data.length > 0) {
         // 取最新的一个
         const latestScript = result.data[0];
+        
+        // 保存脚本ID和任务ID（不管状态如何）
+        setCurrentScriptRemakeId(latestScript.id);
+        setCurrentTaskId(`sr-task-${latestScript.id}`);
+        
         if (latestScript.status === 'completed') {
           const segments = Array.isArray(latestScript.segments) ? latestScript.segments : [];
           
@@ -142,9 +147,16 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
             visualNotes: latestScript.visual_notes || '',
             complianceNotes: latestScript.compliance_notes || '',
           });
-          setCurrentScriptRemakeId(latestScript.id);
-          setCurrentTaskId(`sr-task-${latestScript.id}`);
+        } else if (latestScript.status === 'pending' || latestScript.status === 'running') {
+          // 如果有进行中的任务，设置为 loading 状态，开始轮询
+          setLoading(true);
+          setGenerating(true);
+          pollScriptRemakeStatus(latestScript.id, (attempt, retry) => {
+            setPollProgress({ attempt, retry });
+            setRetryCount(retry);
+          });
         }
+        // 如果是其他状态（如 failed），不设置结果，显示空表单
       }
     } catch (err) {
       console.error('[Script Remake Panel] 加载已有脚本失败:', err);
