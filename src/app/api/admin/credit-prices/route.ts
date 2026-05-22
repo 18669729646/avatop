@@ -20,6 +20,23 @@ const actionTypeNames: Record<string, string> = {
   analysis_master_script_remake: '分析大师脚本复刻',
 };
 
+const defaultPrices: Array<{ actionType: string; creditsRequired: number; description: string }> = [
+  { actionType: 'image_generate', creditsRequired: 10, description: '生成图片' },
+  { actionType: 'video_generate', creditsRequired: 50, description: '生成视频' },
+  { actionType: 'video_trim', creditsRequired: 5, description: '剪辑视频' },
+  { actionType: 'video_concat', creditsRequired: 5, description: '合并视频' },
+  { actionType: 'storage_upload', creditsRequired: 0, description: '上传存储' },
+  { actionType: 'script_generate', creditsRequired: 10, description: '生成短片剧本' },
+  { actionType: 'shortfilm_image', creditsRequired: 5, description: '短片图片生成' },
+  { actionType: 'video_analysis_master', creditsRequired: 10, description: '视频分析大师' },
+  { actionType: 'video_seedance2_480p', creditsRequired: 5, description: 'Seedance 2.0 480p（每秒）' },
+  { actionType: 'video_seedance2_720p', creditsRequired: 8, description: 'Seedance 2.0 720p（每秒）' },
+  { actionType: 'video_seedance2_1080p', creditsRequired: 12, description: 'Seedance 2.0 1080p（每秒）' },
+  { actionType: 'video_seedance2_fast_480p', creditsRequired: 3, description: 'Seedance 2.0 Fast 480p（每秒）' },
+  { actionType: 'video_seedance2_fast_720p', creditsRequired: 5, description: 'Seedance 2.0 Fast 720p（每秒）' },
+  { actionType: 'analysis_master_script_remake', creditsRequired: 10, description: '分析大师脚本复刻' },
+];
+
 /**
  * GET /api/admin/credit-prices
  * 获取所有积分价格配置 */
@@ -33,6 +50,28 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const client = await pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      for (const item of defaultPrices) {
+        await client.query(
+          `INSERT INTO system_credit_prices (id, action_type, credits_required, description, is_active, created_at, updated_at)
+           SELECT $1, $2, $3, $4, true, NOW(), NOW()
+           WHERE NOT EXISTS (SELECT 1 FROM system_credit_prices WHERE action_type = $2)`,
+          [`price_${item.actionType}`, item.actionType, item.creditsRequired, item.description]
+        );
+      }
+      
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('初始化默认积分配置失败:', error);
+    } finally {
+      client.release();
+    }
+
     const result = await pool.query(
       'SELECT * FROM system_credit_prices ORDER BY action_type'
     );

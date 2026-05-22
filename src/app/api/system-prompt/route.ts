@@ -89,6 +89,7 @@ function getDefaultPrompt(type: PromptType): string {
 function normalizePromptType(type: unknown): PromptType {
   if (type === 'video_remake') return 'video_remake';
   if (type === 'analysis_master') return 'analysis_master';
+  if (type === 'analysis_master_script_remake') return 'analysis_master_script_remake';
   return 'shortfilm';
 }
 
@@ -167,7 +168,7 @@ export async function PUT(request: NextRequest) {
       );
     }
     
-    // video_remake 和 analysis_master 不做变量检查，直接保存
+    // video_remake、analysis_master 和 analysis_master_script_remake 不做变量检查，直接保存
     let checkResult = null;
     if (type === 'shortfilm') {
       checkResult = checkVariablesByType(systemPrompt, type);
