@@ -7,6 +7,7 @@ import {
   getScriptRemakesByProject,
   getScriptRemakeById,
 } from '@/lib/analysis-master-script-remake';
+import type { AnalysisMasterResult } from '@/lib/analysis-master';
 
 export async function POST(request: NextRequest) {
   const authResult = await authenticateRequest(request);
@@ -19,6 +20,7 @@ export async function POST(request: NextRequest) {
   let productId = '';
   let language = 'en-US';
   let includeChinese = true;
+  let extraRequirements: string | undefined;
 
   try {
     const body = await request.json();
@@ -26,6 +28,7 @@ export async function POST(request: NextRequest) {
     productId = body.productId || '';
     language = body.language || 'en-US';
     includeChinese = body.includeChinese !== false;
+    extraRequirements = body.extraRequirements;
 
     if (!projectId) {
       return NextResponse.json({ success: false, error: '请提供项目ID' }, { status: 400 });
@@ -45,6 +48,7 @@ export async function POST(request: NextRequest) {
       triggerProcessing: true,
       language,
       includeChinese,
+      extraRequirements,
     });
 
     console.log(`[Script Remake API] 任务已入队，taskId=${result.taskId}, scriptRemakeId=${result.scriptRemakeId}`);

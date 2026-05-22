@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -13,6 +13,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import type { ProductSelection } from '@/lib/products';
 import { authFetch } from '@/lib/auth-context';
 import { copyToClipboard } from '@/lib/prompt-templates';
@@ -80,9 +82,10 @@ const TIKTOK_LANGUAGES = [
 
 interface ScriptRemakePanelProps {
   selectedProject: AnalysisProject | undefined;
+  isAdmin?: boolean;
 }
 
-export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
+export function ScriptRemakePanel({ selectedProject, isAdmin = false }: ScriptRemakePanelProps) {
   const [selectedProduct, setSelectedProduct] = useState<ProductSelection | null>(null);
   const [showProductSelector, setShowProductSelector] = useState(false);
   const [scriptRemakeResult, setScriptRemakeResult] = useState<ScriptRemakeResult | null>(null);
@@ -90,11 +93,16 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
   const [error, setError] = useState('');
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
+  const [currentScriptRemakeId, setCurrentScriptRemakeId] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const [loadingExisting, setLoadingExisting] = useState(false);
+  // 新增：额外要求输入
+  const [extraRequirements, setExtraRequirements] = useState('');
+  // 管理员预览状态
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewData, setPreviewData] = useState<Record<string, unknown> | null>(null);
   const [generating, setGenerating] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState('en-US');
-  const [retryCount, setRetryCount] = useState(0);
-  const [currentScriptRemakeId, setCurrentScriptRemakeId] = useState<string | null>(null);
-  const [loadingExisting, setLoadingExisting] = useState(false);
 
   const canGenerate = selectedProject?.status === 'completed' &&
                       selectedProject?.result &&
@@ -214,6 +222,7 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
         setCurrentTaskId(null);
         setCurrentScriptRemakeId(null);
         setRetryCount(0);
+        setExtraRequirements('');
       }
       setPrevProjectId(selectedProject.id);
       
@@ -310,22 +319,56 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
   // 进度状态
   const [pollProgress, setPollProgress] = useState({ attempt: 0, retry: 0 });
 
+  // 管理员：确认执行生成
+  const confirmGenerate = async () => {
+    setShowPreview(false);
+    const data = previewData as { scriptRemakeId: string } | null;
+    if (!data?.scriptRemakeId) return;
+
+    setCurrentScriptRemakeId(data.scriptRemakeId);
+    setCurrentTaskId(`sr-task-${data.scriptRemakeId}`);
+    setGenerating(true);
+    setLoading(true);
+
+    try {
+      const pollResult = await pollScriptRemakeStatus(data.scriptRemakeId, (attempt, retry) => {
+        setPollProgress({ attempt, retry });
+        setRetryCount(retry);
+        setGenerating(true);
+      });
+
+      if (pollResult && 'id' in pollResult) {
+        setScriptRemakeResult(pollResult);
+      } else if (pollResult && pollResult.status === 'failed') {
+        setError(pollResult.error || '脚本生成失败');
+      } else {
+        setError('脚本生成超时，已达最大重试次数');
+      }
+    } catch (err) {
+      setError((err as Error).message || '脚本生成失败');
+    } finally {
+      setLoading(false);
+      setGenerating(false);
+      setPreviewData(null);
+    }
+  };
+
   const handleGenerate = async (manualRetryScriptId?: string) => {
     if (!selectedProject?.id || !selectedProduct) return;
 
-    setLoading(true);
-    setGenerating(true);
     setError('');
     setScriptRemakeResult(null);
     setRetryCount(0);
     setPollProgress({ attempt: 0, retry: 0 });
 
-    try {
-      // 如果是手动重试，直接用之前的 scriptRemakeId 轮询
-      if (manualRetryScriptId) {
-        setCurrentScriptRemakeId(manualRetryScriptId);
-        setCurrentTaskId(`sr-task-${manualRetryScriptId}`);
+    // 如果是手动重试，直接用之前的 scriptRemakeId 轮询
+    if (manualRetryScriptId) {
+      setCurrentScriptRemakeId(manualRetryScriptId);
+      setCurrentTaskId(`sr-task-${manualRetryScriptId}`);
+      setLoading(true);
+      setGenerating(true);
 
+      try {
         const result = await pollScriptRemakeStatus(manualRetryScriptId, (attempt, retry) => {
           setPollProgress({ attempt, retry });
           setRetryCount(retry);
@@ -339,19 +382,50 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
         } else {
           setError('脚本生成超时，已达最大重试次数');
         }
+      } finally {
         setLoading(false);
-        return;
       }
+      return;
+    }
 
+    // 构建请求体
+    const requestBody = {
+      projectId: selectedProject.id,
+      productId: selectedProduct.id,
+      language: selectedLanguage,
+      includeChinese: true,
+      extraRequirements: extraRequirements.trim() || undefined,
+    };
+
+    // 管理员：先预览请求体
+    if (isAdmin) {
+      setLoading(true);
+      try {
+        const previewRes = await authFetch('/api/analysis-master/script-remake/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
+        const previewResult = await previewRes.json();
+        if (!previewRes.ok) throw new Error(previewResult.error || '预览失败');
+        setPreviewData({ ...requestBody, scriptRemakeId: previewResult.data?.scriptRemakeId });
+        setShowPreview(true);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '预览失败');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    // 非管理员：直接发送请求
+    setLoading(true);
+    setGenerating(true);
+    try {
       const response = await authFetch('/api/analysis-master/script-remake', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          projectId: selectedProject.id,
-          productId: selectedProduct.id,
-          language: selectedLanguage,
-          includeChinese: true,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const result = await response.json();
@@ -384,6 +458,7 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
       setError((err as Error).message || '脚本生成失败');
     } finally {
       setLoading(false);
+      setGenerating(false);
     }
   };
 
@@ -547,6 +622,20 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
                               ))}
                             </SelectContent>
                           </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="extra-requirements" className="text-sm flex justify-between">
+                            <span>额外要求（可选）</span>
+                            <span className="text-muted-foreground text-xs">{extraRequirements.length}/500</span>
+                          </Label>
+                          <Textarea
+                            id="extra-requirements"
+                            placeholder="输入对脚本的额外要求，如：强调某个卖点、使用特定风格的表达等..."
+                            value={extraRequirements}
+                            onChange={(e) => setExtraRequirements(e.target.value.slice(0, 500))}
+                            rows={3}
+                            className="resize-none text-sm"
+                          />
                         </div>
                         <Button
                           onClick={() => handleGenerate()}
@@ -771,6 +860,45 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
         title="选择产品"
         description="选择一个产品以生成复刻脚本"
       />
+
+      {/* 管理员预览弹窗 */}
+      <Dialog open={showPreview} onOpenChange={(open) => { if (!open) { setShowPreview(false); setPreviewData(null); } }}>
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>管理员预览 - 确认生成请求</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto space-y-4">
+            {previewData && (
+              <>
+                <div>
+                  <div className="text-sm font-medium text-muted-foreground mb-2">POST 请求体</div>
+                  <pre className="text-xs bg-muted p-3 rounded-lg overflow-x-auto whitespace-pre-wrap">
+                    {JSON.stringify(previewData, null, 2)}
+                  </pre>
+                </div>
+              </>
+            )}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => { setShowPreview(false); setPreviewData(null); }}>
+              取消
+            </Button>
+            <Button onClick={confirmGenerate} disabled={loading}>
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  生成中...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 mr-2" />
+                  确认执行
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

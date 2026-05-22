@@ -243,6 +243,7 @@ interface ProjectPanelProps {
   selectedProjectIsOptimistic: boolean;
   analyzingId: string;
   exporting: boolean;
+  isAdmin: boolean;
   analyzeProject: (id: string) => Promise<void>;
   exportProjects: (ids?: string[]) => Promise<void>;
 }
@@ -252,6 +253,7 @@ const ProjectPanel = React.memo<ProjectPanelProps>(({
   selectedProjectIsOptimistic,
   analyzingId,
   exporting,
+  isAdmin,
   analyzeProject,
   exportProjects,
 }) => {
@@ -388,7 +390,7 @@ const ProjectPanel = React.memo<ProjectPanelProps>(({
         </Card>
       ))}
 
-      <ScriptRemakePanel selectedProject={selectedProject} />
+      <ScriptRemakePanel selectedProject={selectedProject} isAdmin={isAdmin} />
     </div>
   );
 }, (prev, next) => {
@@ -1173,6 +1175,7 @@ export default function AnalysisMasterPage() {
                   selectedProjectIsOptimistic={selectedProjectIsOptimistic}
                   analyzingId={analyzingId}
                   exporting={exporting}
+                  isAdmin={isAdmin}
                   analyzeProject={analyzeProject}
                   exportProjects={exportProjects}
                 />

@@ -38,6 +38,7 @@ export interface ScriptRemakeInput {
   product: ProductSelection;
   language?: string;
   includeChinese?: boolean;
+  extraRequirements?: string;
 }
 
 export interface ScriptRemakeOptions {
@@ -126,6 +127,7 @@ export async function getScriptRemakePrompt(context: {
   product: ProductSelection;
   language?: string;
   includeChinese?: boolean;
+  extraRequirements?: string;
 }): Promise<string> {
   let template = '';
   try {
@@ -161,6 +163,7 @@ export async function getScriptRemakePrompt(context: {
     productImages: '[图片数据已附加]',
     targetLanguage: languageTag,
     includeChinese: includeChineseStr,
+    extraRequirements: context.extraRequirements || '',
   });
 
   return prompt;
@@ -214,6 +217,7 @@ export async function generateScriptRemake(
     product: input.product,
     language: input.language,
     includeChinese: input.includeChinese,
+    extraRequirements: input.extraRequirements,
   });
 
   const parts: Array<Record<string, unknown>> = [{ text: prompt }];
@@ -436,6 +440,7 @@ export interface ScriptRemakeTaskParams {
   creditsRequired: number;
   language?: string;
   includeChinese?: boolean;
+  extraRequirements?: string;
 }
 
 export function buildInternalTaskHeaders(userId: string): Headers {
@@ -468,6 +473,7 @@ export async function enqueueScriptRemakeTask(params: {
   triggerProcessing?: boolean;
   language?: string;
   includeChinese?: boolean;
+  extraRequirements?: string;
 }): Promise<{ taskId: string; scriptRemakeId: string }> {
   const client = getSupabaseClient();
   const { data: project, error: projectError } = await client
@@ -558,6 +564,7 @@ export async function enqueueScriptRemakeTask(params: {
         creditsRequired: price.creditsRequired,
         language: params.language,
         includeChinese: params.includeChinese,
+        extraRequirements: params.extraRequirements,
       } satisfies ScriptRemakeTaskParams,
       project_id: params.projectId,
       retry_count: 0,
