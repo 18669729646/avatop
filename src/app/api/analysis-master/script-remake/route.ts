@@ -164,8 +164,8 @@ export async function GET(request: NextRequest) {
 
     const results = (remakeData || []).map(item => ({
       id: item.id,
-      projectId: item.project_id,
-      productId: item.product_id,
+      project_id: item.project_id,
+      product_id: item.product_id,
       status: item.status,
       title: item.title,
       hook: item.hook,
@@ -178,6 +178,8 @@ export async function GET(request: NextRequest) {
       shooting_notes: item.shooting_notes,
       visual_notes: item.visual_notes,
       compliance_notes: item.compliance_notes,
+      product_snapshot: item.product_snapshot,
+      analysis_snapshot: item.analysis_snapshot,
       error: item.error,
       created_at: item.created_at,
       updated_at: item.updated_at,
