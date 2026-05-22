@@ -71,7 +71,7 @@ export interface ScriptRemakeSaveData {
 }
 
 // Gemini JSON Schema for script remake response
-const SCRIPT_REMAKE_JSON_SCHEMA = {
+export const SCRIPT_REMAKE_JSON_SCHEMA = {
   type: "object",
   properties: {
     title: { type: "string", description: "视频标题" },
