@@ -4,24 +4,25 @@ import { logAdminAction } from '@/lib/admin-log';
 import { pool } from '@/lib/db-pool';
 
 const actionTypeNames: Record<string, string> = {
-  image_generate: '鐢熸垚鍥剧墖',
-  video_generate: '鐢熸垚瑙嗛',
-  video_trim: '鎴彇瑙嗛',
-  video_concat: '鍚堝苟瑙嗛',
-  storage_upload: '涓婁紶瀛樺偍',
-  script_generate: '鐢熸垚鐭墖鑴氭湰',
-  shortfilm_image: '鐭墖鍥剧墖鐢熸垚',
+  image_generate: '生成图片',
+  video_generate: '生成视频',
+  video_trim: '剪辑视频',
+  video_concat: '合并视频',
+  storage_upload: '上传存储',
+  script_generate: '生成短片剧本',
+  shortfilm_image: '短片图片生成',
   video_analysis_master: '视频分析大师',
   video_seedance2_480p: 'Seedance 2.0 480p（每秒）',
   video_seedance2_720p: 'Seedance 2.0 720p（每秒）',
   video_seedance2_1080p: 'Seedance 2.0 1080p（每秒）',
   video_seedance2_fast_480p: 'Seedance 2.0 Fast 480p（每秒）',
   video_seedance2_fast_720p: 'Seedance 2.0 Fast 720p（每秒）',
+  analysis_master_script_remake: '分析大师脚本复刻',
 };
 
 /**
  * GET /api/admin/credit-prices
- * 鑾峰彇鎵€鏈夌Н鍒嗕环鏍奸厤缃? */
+ * 获取所有积分价格配置 */
 export async function GET(request: NextRequest) {
   const authResult = await requireAdmin(request);
   if (!authResult.success) {
@@ -52,9 +53,9 @@ export async function GET(request: NextRequest) {
       data: { prices },
     });
   } catch (error) {
-    console.error('鑾峰彇绉垎閰嶇疆澶辫触:', error);
+    console.error('获取积分配置失败:', error);
     return NextResponse.json(
-      { success: false, error: '鑾峰彇绉垎閰嶇疆澶辫触' },
+      { success: false, error: '获取积分配置失败' },
       { status: 500 }
     );
   }
@@ -62,7 +63,7 @@ export async function GET(request: NextRequest) {
 
 /**
  * PUT /api/admin/credit-prices
- * 鎵归噺鏇存柊绉垎浠锋牸閰嶇疆
+ * 批量更新积分价格配置
  */
 export async function PUT(request: NextRequest) {
   const authResult = await requireAdmin(request);
@@ -79,7 +80,7 @@ export async function PUT(request: NextRequest) {
 
     if (!Array.isArray(prices)) {
       return NextResponse.json(
-        { success: false, error: '鍙傛暟鏍煎紡閿欒' },
+        { success: false, error: '参数格式错误' },
         { status: 400 }
       );
     }
@@ -92,7 +93,7 @@ export async function PUT(request: NextRequest) {
       for (const item of prices) {
         const { actionType, creditsRequired } = item;
         
-        // 楠岃瘉鍙傛暟
+        // 验证参数
         if (!actionType || typeof creditsRequired !== 'number' || creditsRequired < 0) {
           continue;
         }
@@ -107,7 +108,7 @@ export async function PUT(request: NextRequest) {
 
       await client.query('COMMIT');
 
-      // 璁板綍鎿嶄綔鏃ュ織
+      // 记录操作日志
       await logAdminAction({
         adminId: authResult.userId,
         actionType: 'system_config',
@@ -133,9 +134,9 @@ export async function PUT(request: NextRequest) {
       client.release();
     }
   } catch (error) {
-    console.error('鏇存柊绉垎閰嶇疆澶辫触:', error);
+    console.error('更新积分配置失败:', error);
     return NextResponse.json(
-      { success: false, error: '鏇存柊绉垎閰嶇疆澶辫触' },
+      { success: false, error: '更新积分配置失败' },
       { status: 500 }
     );
   }
@@ -143,7 +144,7 @@ export async function PUT(request: NextRequest) {
 
 /**
  * POST /api/admin/credit-prices
- * 娣诲姞鏂扮殑绉垎浠锋牸閰嶇疆
+ * 添加新的积分价格配置
  */
 export async function POST(request: NextRequest) {
   const authResult = await requireAdmin(request);
@@ -160,7 +161,7 @@ export async function POST(request: NextRequest) {
 
     if (!actionType || typeof creditsRequired !== 'number' || creditsRequired < 0) {
       return NextResponse.json(
-        { success: false, error: '鍙傛暟鏍煎紡閿欒' },
+        { success: false, error: '参数格式错误' },
         { status: 400 }
       );
     }
@@ -174,7 +175,7 @@ export async function POST(request: NextRequest) {
       [id, actionType, creditsRequired, description || '']
     );
 
-    // 璁板綍鎿嶄綔鏃ュ織
+    // 记录操作日志
     await logAdminAction({
       adminId: authResult.userId,
       actionType: 'system_config',
@@ -192,9 +193,9 @@ export async function POST(request: NextRequest) {
       message: '配置已添加',
     });
   } catch (error) {
-    console.error('娣诲姞绉垎閰嶇疆澶辫触:', error);
+    console.error('添加积分配置失败:', error);
     return NextResponse.json(
-      { success: false, error: '娣诲姞绉垎閰嶇疆澶辫触' },
+      { success: false, error: '添加积分配置失败' },
       { status: 500 }
     );
   }
