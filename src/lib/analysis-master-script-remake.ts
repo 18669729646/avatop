@@ -105,7 +105,7 @@ export const SCRIPT_REMAKE_JSON_SCHEMA = {
     visualNotes: { type: "string", description: "视觉风格说明" },
     complianceNotes: { type: "string", description: "合规注意事项" }
   },
-  required: ["title", "hook", "fullScript", "fullScriptCn", "segments"]
+  required: ["title", "hook", "painPoint", "sellingPointScript", "cta", "fullScript", "fullScriptCn", "segments", "shootingNotes", "visualNotes", "complianceNotes"]
 };
 
 function extractJsonObject(text: string): Record<string, unknown> {
