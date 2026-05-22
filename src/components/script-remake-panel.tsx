@@ -99,6 +99,24 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
                       selectedProject?.result &&
                       selectedProduct;
 
+  // 当项目变化时，清空脚本复刻结果
+  const [prevProjectId, setPrevProjectId] = useState<string | null>(null);
+  
+  React.useEffect(() => {
+    if (selectedProject?.id && selectedProject.id !== prevProjectId) {
+      if (prevProjectId !== null) {
+        // 项目已切换，清空所有状态
+        setScriptRemakeResult(null);
+        setError('');
+        setSelectedProduct(null);
+        setCurrentTaskId(null);
+        setCurrentScriptRemakeId(null);
+        setRetryCount(0);
+      }
+      setPrevProjectId(selectedProject.id);
+    }
+  }, [selectedProject?.id, prevProjectId]);
+
   const handleProductSelect = (product: ProductSelection) => {
     setSelectedProduct(product);
     setShowProductSelector(false);
