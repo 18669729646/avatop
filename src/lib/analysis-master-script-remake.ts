@@ -68,6 +68,44 @@ export interface ScriptRemakeSaveData {
   rawResult: Record<string, unknown>;
 }
 
+// Gemini JSON Schema for script remake response
+const SCRIPT_REMAKE_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    title: { type: "string", description: "视频标题" },
+    hook: { type: "string", description: "吸引观众的钩子" },
+    painPoint: { type: "string", description: "痛点描述" },
+    sellingPointScript: { type: "string", description: "卖点脚本" },
+    cta: { type: "string", description: "行动号召" },
+    fullScript: { type: "string", description: "完整英文脚本" },
+    fullScriptCn: { type: "string", description: "完整中文脚本" },
+    segments: {
+      type: "array",
+      description: "视频分镜列表",
+      items: {
+        type: "object",
+        properties: {
+          order: { type: "integer", description: "分镜顺序" },
+          durationSec: { type: "integer", description: "分镜时长（秒）" },
+          scene: { type: "string", description: "场景描述" },
+          voiceover: { type: "string", description: "英文旁白" },
+          voiceoverCn: { type: "string", description: "中文旁白" },
+          action: { type: "string", description: "人物动作" },
+          productPlacement: { type: "string", description: "产品展示位置" },
+          camera: { type: "string", description: "镜头运动" },
+          onScreenText: { type: "string", description: "屏幕文字（英文）" },
+          onScreenTextCn: { type: "string", description: "屏幕文字（中文）" }
+        },
+        required: ["order", "durationSec", "scene", "action", "productPlacement", "camera"]
+      }
+    },
+    shootingNotes: { type: "string", description: "拍摄建议" },
+    visualNotes: { type: "string", description: "视觉风格说明" },
+    complianceNotes: { type: "string", description: "合规注意事项" }
+  },
+  required: ["title", "hook", "segments"]
+};
+
 function extractJsonObject(text: string): Record<string, unknown> {
   // 先尝试直接解析
   try {
@@ -295,8 +333,9 @@ export async function generateScriptRemake(
         temperature: 0.3,
         topP: 0.9,
         maxOutputTokens: 32768,
-        response_mime_type: 'application/json',
       },
+      // 使用 responseSchema 确保 JSON 输出（比 response_mime_type 更可靠）
+      responseSchema: SCRIPT_REMAKE_JSON_SCHEMA,
     }),
     signal: AbortSignal.timeout(10 * 60 * 1000),
   });
@@ -308,30 +347,11 @@ export async function generateScriptRemake(
   }
 
   const result = await response.json();
-  const text = result.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  console.log(`[Script Remake] AI 返回内容长度: ${text.length}`);
-  console.log(`[Script Remake] AI 返回内容全文: ${text}`);
+  // 使用 responseSchema 后，直接使用 JSON Schema 约束的输出，无需 extractJsonObject
+  const scriptRemakeData = result; 
+  console.log(`[Script Remake] AI 返回类型: ${typeof scriptRemakeData}`);
 
-  let rawResult: Record<string, unknown>;
-  try {
-    rawResult = extractJsonObject(text);
-  } catch (parseError) {
-    console.error(`[Script Remake] JSON 解析失败，原始内容已记录，长度: ${text.length}`);
-    // 将原始返回存储到数据库，便于排查
-    try {
-      const { getSupabaseClient } = await import('@/storage/database/supabase-client');
-      const supabase = getSupabaseClient();
-      await supabase
-        .from('analysis_master_script_remakes')
-        .update({ raw_result: text, error: 'AI 返回内容不是有效 JSON，原始内容已保存' })
-        .eq('id', scriptRemakeId);
-    } catch (dbError) {
-      console.error('[Script Remake] 保存原始返回失败:', dbError);
-    }
-    throw parseError;
-  }
-
-  return normalizeScriptRemakeResult(rawResult);
+  return normalizeScriptRemakeResult(scriptRemakeData as Record<string, unknown>);
 }
 
 export function normalizeScriptRemakeResult(raw: Record<string, unknown>): ScriptRemakeResult {
