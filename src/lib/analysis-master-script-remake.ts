@@ -253,10 +253,6 @@ export async function generateScriptRemake(
         maxOutputTokens: 32768,
         response_mime_type: 'application/json',
       },
-      // 禁用思考模式，确保直接返回 JSON 结果
-      thinkingConfig: {
-        thinkingBudget: 0,
-      },
     }),
     signal: AbortSignal.timeout(10 * 60 * 1000),
   });
