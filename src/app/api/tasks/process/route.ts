@@ -544,6 +544,22 @@ async function processTask(task: QueueTask): Promise<void> {
           .eq('id', task.project_id)
           .eq('user_id', task.user_id);
       }
+
+      // script_remake 任务失败时同步更新 script_remakes 记录状态
+      if (task.type === 'script_remake' && task.user_id) {
+        const scriptRemakeId = (task.params as Record<string, unknown>)?.scriptRemakeId as string | undefined;
+        if (scriptRemakeId) {
+          await supabase
+            .from('analysis_master_script_remakes')
+            .update({
+              status: 'failed',
+              error: errorMessage,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', scriptRemakeId)
+            .eq('user_id', task.user_id);
+        }
+      }
       
       // 更新任务状态为失败
       // last_error 存储 API 返回的原始错误，error 存储重试信息
