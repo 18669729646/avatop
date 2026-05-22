@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth-middleware';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { getProductSelection } from '@/lib/products';
-import type { ProductSelection } from '@/lib/products';
 import { getScriptRemakePrompt, fetchImageData } from '@/lib/analysis-master-script-remake';
 import type { AnalysisMasterResult } from '@/lib/analysis-master';
 
@@ -30,6 +28,7 @@ export async function POST(request: NextRequest) {
     }
 
     const client = getSupabaseClient();
+    const userId = authResult.userId;
 
     // 获取分析结果
     const { data: project, error: projectError } = await client
@@ -44,16 +43,43 @@ export async function POST(request: NextRequest) {
 
     const analysisResult: AnalysisMasterResult = project.result as AnalysisMasterResult;
 
-    // 获取产品信息
-    const product: ProductSelection | null = await getProductSelection(productId);
-    if (!product) {
-      return NextResponse.json({ success: false, error: '产品不存在' }, { status: 404 });
+    // 获取产品信息（直接从数据库，与 enqueueScriptRemakeTask 保持一致）
+    const { data: product, error: productError } = await client
+      .from('products')
+      .select('*')
+      .eq('id', productId)
+      .eq('user_id', userId)
+      .single();
+
+    if (productError || !product) {
+      return NextResponse.json({ success: false, error: '产品不存在或无权限访问' }, { status: 404 });
     }
+
+    // 构建产品快照（与 enqueueScriptRemakeTask 保持一致）
+    const productSnapshot = {
+      ...product,
+      sellingPoints: product.selling_points || [],
+    };
 
     // 构建提示词
     const prompt = await getScriptRemakePrompt({
       analysisResult,
-      product,
+      product: {
+        id: product.id,
+        name: product.name,
+        description: product.description,
+        sellingPoints: productSnapshot.sellingPoints,
+        targetAudience: product.target_audience || '',
+        usageScenarios: product.usage_scenarios || '',
+        brandInfo: product.brand_info || '',
+        priceRange: product.price_range || '',
+        keywords: product.keywords || [],
+        primaryImage: productSnapshot.images?.[0]?.url || '',
+        allImages: (productSnapshot.images || []).map((img: { key: string; url: string }) => ({
+          key: img.key,
+          url: img.url,
+        })),
+      },
       language: language || 'en-US',
       includeChinese: includeChinese !== false,
       extraRequirements,
@@ -62,7 +88,7 @@ export async function POST(request: NextRequest) {
     // 获取图片数据
     const imageBuffers: Array<{ mimeType: string; data: string }> = [];
     const maxImages = 5;
-    const productImages = product.allImages.slice(0, maxImages);
+    const productImages = productSnapshot.images?.slice(0, maxImages) || [];
 
     for (const img of productImages) {
       const buffer = await fetchImageData(img.url);
@@ -78,23 +104,34 @@ export async function POST(request: NextRequest) {
       contents: [
         { parts: [{ text: prompt }, ...imageBuffers.map(img => ({ inlineData: img }))] }
       ],
-      generationConfig: {
-        responseMimeType: 'application/json',
-      },
     };
 
-    console.log('[Script Remake Preview] 预览请求体:', JSON.stringify(previewPayload, null, 2));
-
+    // 返回预览数据
     return NextResponse.json({
       success: true,
       data: {
+        projectId,
+        productId,
+        language: language || 'en-US',
+        includeChinese: includeChinese !== false,
+        extraRequirements: extraRequirements || '',
         prompt,
-        imageCount: imageBuffers.length,
         payload: previewPayload,
+        productSnapshot: {
+          id: product.id,
+          name: product.name,
+          description: product.description,
+          sellingPoints: productSnapshot.sellingPoints,
+        },
+        analysisSnapshot: {
+          summary: analysisResult.summary || '',
+          videoPrompt: analysisResult.videoPrompt || '',
+          imagePrompt: analysisResult.imagePrompt || '',
+        },
       },
     });
   } catch (error) {
-    console.error(`[Script Remake Preview] 预览失败: ${(error as Error).message}`);
+    console.error('[Script Remake Preview API] 预览失败:', (error as Error).message);
     return NextResponse.json({ success: false, error: (error as Error).message }, { status: 500 });
   }
 }
