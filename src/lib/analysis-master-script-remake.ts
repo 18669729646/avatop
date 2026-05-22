@@ -198,7 +198,7 @@ export async function fetchImageData(url: string): Promise<Buffer | null> {
 /**
  * 重新生成 S3 预签名 URL（因为预签名 URL 可能已过期）
  */
-async function refreshImageUrls(keys: string[], maxImages: number): Promise<{ url: string; key: string }[]> {
+export async function refreshImageUrls(keys: string[], maxImages: number): Promise<{ url: string; key: string }[]> {
   const freshImages: { url: string; key: string }[] = [];
   const keysToFetch = keys.slice(0, maxImages);
 

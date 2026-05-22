@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth-middleware';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { getScriptRemakePrompt, fetchImageData } from '@/lib/analysis-master-script-remake';
+import { getScriptRemakePrompt, fetchImageData, refreshImageUrls } from '@/lib/analysis-master-script-remake';
 import type { AnalysisMasterResult } from '@/lib/analysis-master';
 
 // POST /api/analysis-master/script-remake/preview - 预览请求体（仅管理员）
@@ -97,7 +97,9 @@ export async function POST(request: NextRequest) {
     const endpoint = `${basePath}/models/${model}:generateContent`;
 
     const maxImages = 5;
-    const productImages = productSnapshot.images?.slice(0, maxImages) || [];
+    const imageKeys = (productSnapshot.images || []).slice(0, maxImages).map((img: { key: string }) => img.key);
+    const refreshedImages = await refreshImageUrls(imageKeys, 7 * 24 * 60 * 60); // 7天有效期
+    const productImages = refreshedImages.slice(0, maxImages);
 
     // 构建完整的请求体（与实际调用完全一致）
     const parts: Array<Record<string, unknown>> = [{ text: prompt }];
