@@ -12,12 +12,12 @@ export interface ScriptRemakeSegment {
   durationSec: number;
   scene: string;
   voiceover: string;
-  voiceoverCn?: string;
+  voiceoverCn: string;
   action: string;
   productPlacement: string;
   camera: string;
   onScreenText: string;
-  onScreenTextCn?: string;
+  onScreenTextCn: string;
 }
 
 export interface ScriptRemakeResult {
@@ -27,7 +27,7 @@ export interface ScriptRemakeResult {
   sellingPointScript: string;
   cta: string;
   fullScript: string;
-  fullScriptCn?: string;
+  fullScriptCn: string;
   segments: ScriptRemakeSegment[];
   shootingNotes: string;
   visualNotes: string;
@@ -60,7 +60,7 @@ export interface ScriptRemakeSaveData {
   sellingPointScript: string;
   cta: string;
   fullScript: string;
-  fullScriptCn?: string;
+  fullScriptCn: string;
   segments: ScriptRemakeSegment[];
   shootingNotes: string;
   visualNotes: string;
@@ -98,7 +98,7 @@ export const SCRIPT_REMAKE_JSON_SCHEMA = {
           onScreenText: { type: "string", description: "屏幕文字（英文）" },
           onScreenTextCn: { type: "string", description: "屏幕文字（中文）" }
         },
-        required: ["order", "durationSec", "scene", "voiceover", "voiceoverCn", "action", "productPlacement", "camera"]
+        required: ["order", "durationSec", "scene", "voiceover", "voiceoverCn", "action", "productPlacement", "camera", "onScreenText", "onScreenTextCn"]
       }
     },
     shootingNotes: { type: "string", description: "拍摄建议" },
