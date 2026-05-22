@@ -347,8 +347,8 @@ export async function generateScriptRemake(
   }
 
   const result = await response.json();
-  // 使用 responseSchema 后，直接使用 JSON Schema 约束的输出，无需 extractJsonObject
-  const scriptRemakeData = result; 
+  // 使用 responseSchema 后，数据在 candidates[0].content.parts[0] 中
+  const scriptRemakeData = result?.candidates?.[0]?.content?.parts?.[0] || {};
   console.log(`[Script Remake] AI 返回类型: ${typeof scriptRemakeData}`);
 
   return normalizeScriptRemakeResult(scriptRemakeData as Record<string, unknown>);
