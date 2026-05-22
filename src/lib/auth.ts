@@ -8,7 +8,7 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { randomUUID } from 'crypto';
 
 // JWT 配置
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-jwt-secret-key-change-in-production';
+export const JWT_SECRET = process.env.JWT_SECRET || 'dev-jwt-secret-key-change-in-production';
 const JWT_EXPIRES_DAYS = parseInt(process.env.JWT_EXPIRES_DAYS || '7', 10);
 
 // JWT payload 类型

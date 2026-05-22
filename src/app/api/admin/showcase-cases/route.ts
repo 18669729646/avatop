@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';
 import { pool } from '@/lib/db-pool';
 import { ShowcaseCase, GetShowcaseCasesParams } from '@/types/showcase';
-
-// JWT 密钥
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-jwt-secret-key-change-in-production';
+import { JWT_SECRET } from '@/lib/auth';
 
 // 验证管理员权限
 async function verifyAdmin(request: NextRequest): Promise<{ success: boolean; userId?: string; error?: string }> {

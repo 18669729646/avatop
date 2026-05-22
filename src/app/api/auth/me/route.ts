@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';
 import { pool } from '@/lib/db-pool';
-
-// JWT 密钥
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+import { JWT_SECRET } from '@/lib/auth';
 
 // 获取当前用户信息 API
 export async function GET(request: NextRequest) {

@@ -3,9 +3,7 @@ import jwt from 'jsonwebtoken';
 import { pool } from '@/lib/db-pool';
 import { s3Storage } from '@/lib/s3-client';
 import { URL_EXPIRE_TIME } from '@/lib/storage-types';
-
-// JWT 密钥
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+import { JWT_SECRET } from '@/lib/auth';
 
 // 验证管理员权限
 async function verifyAdmin(request: NextRequest): Promise<{ success: boolean; userId?: string; error?: string }> {

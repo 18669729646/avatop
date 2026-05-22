@@ -3,9 +3,7 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { randomBytes } from 'crypto';
 import { pool } from '@/lib/db-pool';
-
-// JWT 密钥
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+import { JWT_SECRET } from '@/lib/auth';
 
 // 生成唯一 ID
 function generateId(): string {
