@@ -362,7 +362,7 @@ export function getDefaultAnalysisMasterScriptRemakePrompt(): string {
 10. 语言要求：
     - title、hook、painPoint、sellingPointScript、cta、shootingNotes、visualNotes 等描述性字段使用中文。
     - fullScript（完整口播）、segments 中的 voiceover（口播内容）、onScreenText（屏幕文字）使用目标语言 {{targetLanguage}}。
-    - 如果 includeChinese=true，fullScript、voiceover、onScreenText 还需要额外输出对应的中文版本（在字段名后加 _cn 后缀）。
+    - fullScript、voiceover、onScreenText 还需要额外输出对应的中文版本（在字段名后加 _cn 后缀）。
 
 【原视频反推结果】
 {{analysisResult}}
@@ -456,19 +456,19 @@ export function getDefaultAnalysisMasterScriptRemakePrompt(): string {
   "sellingPointScript": "核心卖点表达，把产品卖点转化为短视频口播语言（中文）",
   "cta": "转化引导，模仿原视频CTA节奏（中文）",
   "fullScript": "完整口播脚本（目标语言 {{targetLanguage}}）",
-  "fullScriptCn": "完整口播脚本（中文，仅当 includeChinese=true 时）",
+  "fullScriptCn": "完整口播脚本（中文版）",
   "segments": [
     {
       "order": 1,
       "durationSec": 3,
       "scene": "这一段的画面内容（中文）",
       "voiceover": "这一段的口播内容（目标语言 {{targetLanguage}}）",
-      "voiceoverCn": "这一段的口播内容（中文，仅当 includeChinese=true 时）",
+      "voiceoverCn": "这一段的口播内容（中文版）",
       "action": "人物或产品动作调度（中文）",
       "productPlacement": "产品露出方式（中文）",
       "camera": "镜头景别、角度、运动方式（中文）",
       "onScreenText": "屏幕文字（目标语言 {{targetLanguage}}）",
-      "onScreenTextCn": "屏幕文字（中文，仅当 includeChinese=true 时）"
+      "onScreenTextCn": "屏幕文字（中文版）"
     }
   ],
   "shootingNotes": "拍摄执行建议，包括产品如何摆放、人物如何演示、哪些细节必须拍清楚（中文）",
@@ -486,7 +486,7 @@ export function getDefaultAnalysisMasterScriptRemakePrompt(): string {
 7. segments 可以有多个分段，但必须全部包含在同一个 JSON 对象中。
 8. 如果某项信息缺失，用空字符串，不要删除字段。
 9. fullScript 必须是完整可直接口播的目标语言脚本。
-10. 如果 includeChinese=true，fullScript、voiceover、onScreenText 必须同时输出对应的中文版本（带 _cn 后缀）。`;
+10. fullScript、voiceover、onScreenText 必须同时输出对应的中文版本（带 _cn 后缀）。`;
 }
 
 export function getDefaultAnalysisMasterPrompt(): string {
