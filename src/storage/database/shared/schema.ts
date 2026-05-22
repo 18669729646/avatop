@@ -744,6 +744,52 @@ export const analysisMasterProjects = pgTable(
   ]
 );
 
+// 分析大师脚本复刻表
+export const analysisMasterScriptRemakes = pgTable(
+  "analysis_master_script_remakes",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    userId: varchar("user_id", { length: 64 }).notNull().references(() => users.id, { onDelete: 'cascade' }),
+    projectId: varchar("project_id", { length: 64 }).notNull().references(() => analysisMasterProjects.id, { onDelete: 'cascade' }),
+    productId: varchar("product_id", { length: 64 }).notNull().references(() => products.id, { onDelete: 'cascade' }),
+    language: varchar("language", { length: 16 }).default('en-US'),
+    status: varchar("status", { length: 32 }).default('completed').notNull(),
+    title: text("title"),
+    hook: text("hook"),
+    painPoint: text("pain_point"),
+    sellingPointScript: text("selling_point_script"),
+    cta: text("cta"),
+    fullScript: text("full_script"),
+    fullScriptCn: text("full_script_cn"),
+    segments: jsonb("segments").$type<Array<{
+      order: number;
+      durationSec: number;
+      scene: string;
+      voiceover: string;
+      voiceoverCn: string;
+      action: string;
+      productPlacement: string;
+      camera: string;
+      onScreenText: string;
+      onScreenTextCn: string;
+    }>>().default([]),
+    shootingNotes: text("shooting_notes"),
+    visualNotes: text("visual_notes"),
+    complianceNotes: text("compliance_notes"),
+    productSnapshot: jsonb("product_snapshot").$type<Record<string, unknown>>(),
+    analysisSnapshot: jsonb("analysis_snapshot").$type<Record<string, unknown>>(),
+    rawResult: jsonb("raw_result").$type<Record<string, unknown>>(),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("analysis_master_script_remakes_user_idx").on(table.userId, table.createdAt),
+    index("analysis_master_script_remakes_project_idx").on(table.projectId),
+    index("analysis_master_script_remakes_product_idx").on(table.productId),
+  ]
+);
+
 // ============================================================
 // TypeScript 类型导出
 // ============================================================
@@ -804,3 +850,5 @@ export type VideoRemakeAsset = typeof videoRemakeAssets.$inferSelect;
 export type InsertVideoRemakeAsset = typeof videoRemakeAssets.$inferInsert;
 export type AnalysisMasterProject = typeof analysisMasterProjects.$inferSelect;
 export type InsertAnalysisMasterProject = typeof analysisMasterProjects.$inferInsert;
+export type AnalysisMasterScriptRemake = typeof analysisMasterScriptRemakes.$inferSelect;
+export type InsertAnalysisMasterScriptRemake = typeof analysisMasterScriptRemakes.$inferInsert;

@@ -28,7 +28,7 @@ export interface AdminLogDetail {
   after?: Record<string, unknown>;
   reason?: string;
   amount?: number;
-  type?: 'add' | 'deduct' | 'system_prompt' | 'system_prompt_shortfilm' | 'system_prompt_video_remake' | 'system_prompt_analysis_master' | 'set_default_prompt' | 'set_default_prompt_shortfilm' | 'set_default_prompt_video_remake' | 'set_default_prompt_analysis_master' | 'reset_prompt' | 'reset_prompt_shortfilm' | 'reset_prompt_video_remake' | 'reset_prompt_analysis_master' | 'global_clear';
+  type?: 'add' | 'deduct' | 'system_prompt' | 'system_prompt_shortfilm' | 'system_prompt_video_remake' | 'system_prompt_analysis_master' | 'system_prompt_analysis_master_script_remake' | 'set_default_prompt' | 'set_default_prompt_shortfilm' | 'set_default_prompt_video_remake' | 'set_default_prompt_analysis_master' | 'set_default_prompt_analysis_master_script_remake' | 'reset_prompt' | 'reset_prompt_shortfilm' | 'reset_prompt_video_remake' | 'reset_prompt_analysis_master' | 'reset_prompt_analysis_master_script_remake' | 'global_clear';
   [key: string]: unknown;
 }
 

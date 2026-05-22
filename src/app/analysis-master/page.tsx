@@ -25,6 +25,8 @@ import {
   saveAnalysisMasterDraftProjects,
   type AnalysisMasterDraftProject,
 } from '@/lib/analysis-master-drafts';
+import { ScriptRemakePanel } from '@/components/script-remake-panel';
+import { ScriptRemakeDetailModal } from '@/components/script-remake-detail-modal';
 
 const ANALYSIS_MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 
@@ -122,6 +124,13 @@ interface AnalysisProject {
   optimisticError?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+interface ScriptRemakeStatus {
+  id: string;
+  status: string;
+  title: string;
+  created_at: string;
 }
 
 interface BatchImportSummary {
@@ -378,6 +387,8 @@ const ProjectPanel = React.memo<ProjectPanelProps>(({
           </CardContent>
         </Card>
       ))}
+
+      <ScriptRemakePanel selectedProject={selectedProject} />
     </div>
   );
 }, (prev, next) => {
@@ -425,6 +436,9 @@ export default function AnalysisMasterPage() {
   const [batchSummary, setBatchSummary] = useState<BatchImportSummary | null>(null);
   const [projectPage, setProjectPage] = useState(1);
   const { projects: serverProjects, pagination: projectPagination, mutate: mutateProjects, isLoading: isProjectsLoading } = useAnalysisMasterProjects(user?.id, projectPage);
+  const [remakeStatuses, setRemakeStatuses] = useState<Record<string, ScriptRemakeStatus>>({});
+  const [selectedRemake, setSelectedRemake] = useState<ScriptRemakeStatus | null>(null);
+  const [showRemakeModal, setShowRemakeModal] = useState(false);
 
   const projects = useMemo(
     () => mergeAnalysisMasterProjects(serverProjects, draftProjects) as unknown as AnalysisProject[],
@@ -518,10 +532,90 @@ export default function AnalysisMasterPage() {
 
   // SSE 订阅：任务完成/失败时触发 SWR 重新验证，3秒轮询兜底
   useTaskEvents((data) => {
-    if (data.type !== 'analysis') return;
-    // 触发 SWR 重新获取数据，实时反映最新项目状态
-    mutateProjects();
+    if (data.type === 'analysis') {
+      // 触发 SWR 重新获取数据，实时反映最新项目状态
+      mutateProjects();
+    }
+    if (data.type === 'script_remake') {
+      // 当复刻任务有更新时，重新获取复刻状态
+      if (data.projectId) {
+        const projectId = typeof data.projectId === 'string' ? data.projectId : String(data.projectId);
+        fetchRemakeStatusForProject(projectId);
+      }
+    }
   });
+
+  // 单独提取查询单个项目复刻状态的函数
+  const fetchRemakeStatusForProject = useCallback(async (projectId: string) => {
+    try {
+      const response = await authFetch(`/api/analysis-master/script-remake?projectId=${projectId}`);
+      const result = await response.json();
+      if (result.success && result.data && result.data.length > 0) {
+        const latest = result.data[0];
+        setRemakeStatuses(prev => ({
+          ...prev,
+          [projectId]: {
+            id: latest.id,
+            status: latest.status,
+            title: latest.title,
+            created_at: latest.created_at,
+          }
+        }));
+      }
+    } catch (err) {
+      console.error(`[Analysis Master] 获取复刻状态失败: ${projectId}`, err);
+    }
+  }, [authFetch, setRemakeStatuses]);
+
+  // 获取已完成项目的复刻状态，并轮询正在进行中的任务
+  useEffect(() => {
+    const completedProjects = projects.filter(p => p.status === 'completed');
+    if (completedProjects.length === 0) return;
+
+    const fetchRemakeStatuses = async () => {
+      const statuses: Record<string, ScriptRemakeStatus> = {};
+      await Promise.all(
+        completedProjects.map(async (project) => {
+          try {
+            const response = await authFetch(`/api/analysis-master/script-remake?projectId=${project.id}`);
+            const result = await response.json();
+            if (result.success && result.data && result.data.length > 0) {
+              const latest = result.data[0];
+              statuses[project.id] = {
+                id: latest.id,
+                status: latest.status,
+                title: latest.title,
+                created_at: latest.created_at,
+              };
+            }
+          } catch (err) {
+            console.error(`[Analysis Master] 获取复刻状态失败: ${project.id}`, err);
+          }
+        })
+      );
+      setRemakeStatuses(prev => ({ ...prev, ...statuses }));
+    };
+
+    fetchRemakeStatuses();
+  }, [projects, fetchRemakeStatusForProject]);
+
+  // 轮询正在进行中的复刻任务（pending/running 状态）
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      // 在定时器回调中重新计算，避免闭包陷阱
+      const inProgressProjects = Object.entries(remakeStatuses).filter(
+        ([_, status]) => status.status === 'pending' || status.status === 'running'
+      );
+
+      if (inProgressProjects.length === 0) return;
+
+      inProgressProjects.forEach(([projectId]) => {
+        fetchRemakeStatusForProject(projectId);
+      });
+    }, 3000); // 每3秒轮询一次
+
+    return () => clearInterval(intervalId);
+  }, [remakeStatuses, fetchRemakeStatusForProject]);
 
   const createFromLink = async () => {
     const url = sourceUrl.trim();
@@ -996,6 +1090,34 @@ export default function AnalysisMasterPage() {
                           {project.sourceUrl}
                         </a>
                       )}
+                      {project.status === 'completed' && remakeStatuses[project.id] && (
+                        <button
+                          className="flex items-center gap-2 text-xs text-purple-600/70 hover:text-purple-600 mt-1 w-full"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            const status = remakeStatuses[project.id];
+                            try {
+                              const response = await authFetch(`/api/analysis-master/script-remake?id=${status.id}`);
+                              const result = await response.json();
+                              if (result.success && result.data) {
+                                setSelectedRemake(result.data);
+                                setShowRemakeModal(true);
+                              }
+                            } catch (err) {
+                              console.error('[Analysis Master] 获取复刻详情失败', err);
+                            }
+                          }}
+                        >
+                          <Sparkles className="w-3 h-3" />
+                          <span className="truncate">
+                            {remakeStatuses[project.id].status === 'pending' ? '脚本复刻: 排队中' :
+                             remakeStatuses[project.id].status === 'running' ? '脚本复刻: 生成中' :
+                             remakeStatuses[project.id].status === 'completed' ? `脚本复刻: ${remakeStatuses[project.id].title || '已完成'}` :
+                             '脚本复刻: 失败'}
+                          </span>
+                          <span className="text-muted-foreground ml-auto">查看</span>
+                        </button>
+                      )}
                       <div className="flex items-center justify-end gap-2 mt-2">
                         <span className="text-[11px] text-muted-foreground/50">
                           {new Date(project.createdAt).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
@@ -1130,6 +1252,15 @@ export default function AnalysisMasterPage() {
             </div>
           </DialogContent>
         </Dialog>
+
+        <ScriptRemakeDetailModal
+          scriptRemake={selectedRemake}
+          open={showRemakeModal}
+          onClose={() => {
+            setShowRemakeModal(false);
+            setSelectedRemake(null);
+          }}
+        />
       </div>
     </AppLayout>
   );
