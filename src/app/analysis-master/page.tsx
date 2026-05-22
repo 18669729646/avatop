@@ -33,6 +33,7 @@ import {
 } from '@/lib/analysis-master-local-helper';
 
 const ANALYSIS_MAX_VIDEO_BYTES = 100 * 1024 * 1024;
+const ANALYSIS_HELPER_DOWNLOAD_URL = '/analysis-helper/analysis-download-helper-0.1.0.zip';
 
 const CHUNK_SIZE = 5 * 1024 * 1024;
 const PROJECT_PAGE_SIZE = 12;
@@ -429,6 +430,7 @@ export default function AnalysisMasterPage() {
   const [previewProjectId, setPreviewProjectId] = useState<string>('');
   const [showPreview, setShowPreview] = useState(false);
   const [sourceUrl, setSourceUrl] = useState('');
+  const [localHelperDisconnected, setLocalHelperDisconnected] = useState(false);
   const [projectName, setProjectName] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [batchFile, setBatchFile] = useState<File | null>(null);
@@ -664,7 +666,9 @@ export default function AnalysisMasterPage() {
         if (!healthRes.ok) {
           throw new Error('helper unavailable');
         }
+        setLocalHelperDisconnected(false);
       } catch {
+        setLocalHelperDisconnected(true);
         throw new Error('解析组件未连接，请启动后重试；也可以直接上传视频继续分析。');
       } finally {
         window.clearTimeout(healthTimeout);
@@ -681,6 +685,7 @@ export default function AnalysisMasterPage() {
       if (!response.ok || data.success === false) throw new Error(data.error || '视频解析失败，请检查当前网络环境后重试。');
       setSourceUrl('');
       setProjectName('');
+      setLocalHelperDisconnected(false);
       const createdProject = (data.data || data) as { id?: string; projectId?: string };
       setDraftProjects(prev => prev.filter(item => item.clientRequestId !== clientRequestId));
       await mutateProjects().catch(refreshErr => {
@@ -955,18 +960,27 @@ export default function AnalysisMasterPage() {
                   </div>
                   <div className="space-y-2">
                     <Label>视频链接</Label>
+                    <div className="rounded-md border border-purple-200 bg-purple-50 p-3 text-sm text-purple-900">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <div className="font-medium">需要先启动解析组件</div>
+                          <div className="mt-1 text-xs text-purple-700">
+                            {localHelperDisconnected ? '当前未检测到解析组件，请下载并启动后重试。' : '首次使用请先下载并启动，启动后再从链接导入。'}
+                          </div>
+                        </div>
+                        <Button asChild size="sm" variant="outline" className="shrink-0 border-purple-300 bg-white text-purple-700 hover:bg-purple-100">
+                          <a href={ANALYSIS_HELPER_DOWNLOAD_URL}>
+                            <Download className="w-4 h-4 mr-2" />
+                            下载解析组件
+                          </a>
+                        </Button>
+                      </div>
+                    </div>
                     <Textarea value={sourceUrl} onChange={event => setSourceUrl(event.target.value)} placeholder="粘贴 TikTok/抖音公开视频链接" rows={3} />
                     <Button className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700" onClick={createFromLink} disabled={loading}>
                       {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
                       从链接导入
                     </Button>
-                    <a
-                      href="/analysis-helper/analysis-download-helper-0.1.0.zip"
-                      className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-                    >
-                      <Download className="w-3 h-3" />
-                      下载解析组件
-                    </a>
                   </div>
                   <div className="space-y-2">
                     <Label>或上传视频</Label>
