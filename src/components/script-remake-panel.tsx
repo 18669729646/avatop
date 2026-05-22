@@ -94,12 +94,66 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
   const [selectedLanguage, setSelectedLanguage] = useState('en-US');
   const [retryCount, setRetryCount] = useState(0);
   const [currentScriptRemakeId, setCurrentScriptRemakeId] = useState<string | null>(null);
+  const [loadingExisting, setLoadingExisting] = useState(false);
 
   const canGenerate = selectedProject?.status === 'completed' &&
                       selectedProject?.result &&
                       selectedProduct;
 
-  // 当项目变化时，清空脚本复刻结果
+  // 查询项目的最新脚本复刻记录
+  const loadExistingScriptRemake = async (projectId: string) => {
+    setLoadingExisting(true);
+    try {
+      const response = await authFetch(`/api/analysis-master/script-remake?projectId=${projectId}`, {
+        method: 'GET',
+      });
+      const result = await response.json();
+      
+      if (result.success && result.data && result.data.length > 0) {
+        // 取最新的一个
+        const latestScript = result.data[0];
+        if (latestScript.status === 'completed') {
+          const segments = Array.isArray(latestScript.segments) ? latestScript.segments : [];
+          
+          setScriptRemakeResult({
+            id: latestScript.id,
+            projectId: latestScript.projectId,
+            productId: latestScript.productId,
+            title: latestScript.title || '',
+            hook: latestScript.hook || '',
+            painPoint: latestScript.pain_point || '',
+            sellingPointScript: latestScript.selling_point_script || '',
+            cta: latestScript.cta || '',
+            fullScript: latestScript.full_script || '',
+            fullScriptCn: latestScript.full_script_cn || '',
+            segments: segments.map((seg: Record<string, unknown>, index: number) => ({
+              order: typeof seg.order === 'number' ? seg.order : index + 1,
+              durationSec: typeof seg.durationSec === 'number' ? seg.durationSec : 8,
+              scene: String(seg.scene || ''),
+              voiceover: String(seg.voiceover || ''),
+              voiceoverCn: String(seg.voiceoverCn || seg.voiceover_cn || ''),
+              action: String(seg.action || ''),
+              productPlacement: String(seg.productPlacement || ''),
+              camera: String(seg.camera || ''),
+              onScreenText: String(seg.onScreenText || ''),
+              onScreenTextCn: String(seg.onScreenTextCn || seg.onScreenText_cn || ''),
+            })),
+            shootingNotes: latestScript.shooting_notes || '',
+            visualNotes: latestScript.visual_notes || '',
+            complianceNotes: latestScript.compliance_notes || '',
+          });
+          setCurrentScriptRemakeId(latestScript.id);
+          setCurrentTaskId(`sr-task-${latestScript.id}`);
+        }
+      }
+    } catch (err) {
+      console.error('[Script Remake Panel] 加载已有脚本失败:', err);
+    } finally {
+      setLoadingExisting(false);
+    }
+  };
+
+  // 当项目变化时，清空脚本复刻结果并查询最新记录
   const [prevProjectId, setPrevProjectId] = useState<string | null>(null);
   
   React.useEffect(() => {
@@ -114,6 +168,11 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
         setRetryCount(0);
       }
       setPrevProjectId(selectedProject.id);
+      
+      // 查询该项目的最新脚本复刻记录
+      if (selectedProject.status === 'completed' && selectedProject.result) {
+        loadExistingScriptRemake(selectedProject.id);
+      }
     }
   }, [selectedProject?.id, prevProjectId]);
 
@@ -416,7 +475,12 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
                     </div>
                   )}
 
-                  {!scriptRemakeResult ? (
+                  {loadingExisting ? (
+                    <div className="text-center py-4">
+                      <Loader2 className="w-6 h-6 animate-spin mx-auto text-purple-500" />
+                      <div className="text-sm text-muted-foreground mt-2">加载已有脚本...</div>
+                    </div>
+                  ) : !scriptRemakeResult ? (
                     <>
                       <div className="space-y-3">
                         <div className="space-y-2">
@@ -474,15 +538,28 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
                       )}
                     </>
                   ) : (
-                    <div className="space-y-4">
-                      <div className="flex gap-2">
-                        <Button onClick={handleCopyAll} variant="outline" className="flex-1">
-                          <Copy className="w-4 h-4 mr-2" />
-                          {copiedField === 'all' ? '已复制' : '复制全部'}
-                        </Button>
-                        <Button onClick={handleExport} className="flex-1 bg-green-600 hover:bg-green-700">
-                          <FileSpreadsheet className="w-4 h-4 mr-2" />
-                          导出Excel
+                    <>
+                      <div className="space-y-3">
+                        <div className="flex gap-2">
+                          <Button onClick={handleCopyAll} variant="outline" className="flex-1">
+                            <Copy className="w-4 h-4 mr-2" />
+                            {copiedField === 'all' ? '已复制' : '复制全部'}
+                          </Button>
+                          <Button onClick={handleExport} className="flex-1 bg-green-600 hover:bg-green-700">
+                            <FileSpreadsheet className="w-4 h-4 mr-2" />
+                            导出Excel
+                          </Button>
+                        </div>
+                        <Button
+                          onClick={() => {
+                            setScriptRemakeResult(null);
+                            setSelectedProduct(null);
+                          }}
+                          variant="outline"
+                          className="w-full"
+                        >
+                          <Sparkles className="w-4 h-4 mr-2" />
+                          重新复刻
                         </Button>
                       </div>
 
@@ -534,10 +611,12 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
                             <div className="text-xs font-medium text-muted-foreground mb-1">目标语言</div>
                             <div className="text-sm whitespace-pre-wrap max-h-32 overflow-auto">{scriptRemakeResult.fullScript}</div>
                           </div>
-                          <div>
-                            <div className="text-xs font-medium text-muted-foreground mb-1">中文</div>
-                            <div className="text-sm whitespace-pre-wrap max-h-32 overflow-auto">{scriptRemakeResult.fullScriptCn}</div>
-                          </div>
+                          {scriptRemakeResult.fullScriptCn && (
+                            <div>
+                              <div className="text-xs font-medium text-muted-foreground mb-1">中文</div>
+                              <div className="text-sm whitespace-pre-wrap max-h-32 overflow-auto">{scriptRemakeResult.fullScriptCn}</div>
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -628,7 +707,7 @@ export function ScriptRemakePanel({ selectedProject }: ScriptRemakePanelProps) {
                         </div>
                         <div className="p-3 text-sm text-muted-foreground">{scriptRemakeResult.complianceNotes}</div>
                       </div>
-                    </div>
+                    </>
                   )}
                 </div>
               )}
