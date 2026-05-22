@@ -332,6 +332,13 @@ export const ANALYSIS_MASTER_SCRIPT_REMAKE_OPTIONAL_VARIABLES: PromptVariable[] 
     required: false,
     exampleValue: 'true',
   },
+  {
+    name: 'extraRequirements',
+    label: '额外要求',
+    description: '用户对脚本生成的额外要求（如特殊风格、重点强调、禁止内容等）',
+    required: false,
+    exampleValue: '希望口播更有紧迫感，结尾CTA要强',
+  },
 ];
 
 export const ANALYSIS_MASTER_SCRIPT_REMAKE_ALL_VARIABLES: PromptVariable[] = [
@@ -426,6 +433,9 @@ export function getDefaultAnalysisMasterScriptRemakePrompt(): string {
 7. CTA要有转化感，但不能虚假承诺或强行夸大。
 8. 如果原视频反推结果中包含CTA结构，则要复刻其CTA结构，但替换为用户产品表达。
 9. 如果产品资料缺失，不要自行补充虚假信息，用更通用但安全的表达。
+
+【额外要求】
+{{extraRequirements}}
 
 【合规要求】
 - 不要写"最强、第一、永久、100%、保证有效、立刻见效、彻底解决"等绝对化表达。
