@@ -6,6 +6,7 @@ import { extractAnalysisMasterImports, ANALYSIS_MASTER_IMPORT_LIMIT, type Analys
 import {
   buildAnalysisMasterImportRunCreate,
   buildAnalysisMasterImportRunToken,
+  cleanupAnalysisMasterImportRunArtifacts,
   type AnalysisMasterImportMode,
 } from '@/lib/analysis-master-import-runs';
 
@@ -19,11 +20,11 @@ async function readImports(request: NextRequest): Promise<{
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
     if (!file) {
-      throw new Error('请上传 Excel 文件');
+      throw new Error('Please upload an Excel file');
     }
     const fileName = file.name.toLowerCase();
     if (!fileName.endsWith('.xlsx') && !fileName.endsWith('.xls')) {
-      throw new Error('只支持 .xlsx 或 .xls 文件');
+      throw new Error('Only .xlsx or .xls files are supported');
     }
     const buffer = Buffer.from(await file.arrayBuffer());
     return {
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest) {
     const { mode, sourceFileName, imports } = await readImports(request);
     const validImports = imports.filter(item => item.sourceUrl.trim()).slice(0, ANALYSIS_MASTER_IMPORT_LIMIT);
     if (validImports.length === 0) {
-      return NextResponse.json({ error: mode === 'batch' ? 'Excel 中没有找到 TikTok/抖音链接' : '请提供视频链接' }, { status: 400 });
+      return NextResponse.json({ error: mode === 'batch' ? 'No TikTok/Douyin links found in the Excel file' : 'Please provide a video URL' }, { status: 400 });
     }
 
     const built = buildAnalysisMasterImportRunCreate({
@@ -75,25 +76,53 @@ export async function POST(request: NextRequest) {
     });
 
     const client = getSupabaseClient();
+    const createdProjectIds = built.projects.map(project => String(project.id));
+
     const { error: runError } = await client.from('analysis_master_import_runs').insert(built.run);
     if (runError) {
       logApiError('analysis-master/import-runs', 'insert run', runError, { runId: built.run.id }, auth.userId);
-      return NextResponse.json({ error: '创建导入任务失败' }, { status: 500 });
+      return NextResponse.json({ error: 'Failed to create the import run' }, { status: 500 });
     }
 
     const { error: projectError } = await client.from('analysis_master_projects').insert(built.projects);
     if (projectError) {
       logApiError('analysis-master/import-runs', 'insert projects', projectError, { runId: built.run.id }, auth.userId);
-      return NextResponse.json({ error: '创建导入项目失败' }, { status: 500 });
+      const cleanupResult = await cleanupAnalysisMasterImportRunArtifacts(client, {
+        runId: String(built.run.id),
+        projectIds: createdProjectIds,
+      });
+      if (cleanupResult.runError || cleanupResult.projectError) {
+        logApiError(
+          'analysis-master/import-runs',
+          'cleanup after project insert failure',
+          cleanupResult.runError || cleanupResult.projectError,
+          { runId: built.run.id, projectIds: createdProjectIds },
+          auth.userId,
+        );
+      }
+      return NextResponse.json({ error: 'Failed to create import projects' }, { status: 500 });
     }
 
     const { error: itemError } = await client.from('analysis_master_import_items').insert(built.items);
     if (itemError) {
       logApiError('analysis-master/import-runs', 'insert items', itemError, { runId: built.run.id }, auth.userId);
-      return NextResponse.json({ error: '创建导入明细失败' }, { status: 500 });
+      const cleanupResult = await cleanupAnalysisMasterImportRunArtifacts(client, {
+        runId: String(built.run.id),
+        projectIds: createdProjectIds,
+      });
+      if (cleanupResult.runError || cleanupResult.projectError) {
+        logApiError(
+          'analysis-master/import-runs',
+          'cleanup after item insert failure',
+          cleanupResult.runError || cleanupResult.projectError,
+          { runId: built.run.id, projectIds: createdProjectIds },
+          auth.userId,
+        );
+      }
+      return NextResponse.json({ error: 'Failed to create import items' }, { status: 500 });
     }
 
-    logInfo('api', '分析大师导入编排任务已创建', {
+    logInfo('api', 'Analysis Master import orchestration created', {
       runId: built.run.id,
       mode,
       total: validImports.length,
@@ -118,6 +147,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     logApiError('analysis-master/import-runs', 'POST', error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : '创建导入任务失败' }, { status: 500 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to create the import run' }, { status: 500 });
   }
 }

@@ -23,6 +23,23 @@ export interface AnalysisMasterImportRunCreateResult {
   items: Array<Record<string, unknown>>;
 }
 
+type AnalysisMasterImportCleanupResult = {
+  error?: unknown;
+};
+
+type AnalysisMasterImportCleanupQuery = {
+  eq(column: string, value: unknown): unknown;
+  in(column: string, values: unknown[]): unknown;
+};
+
+type AnalysisMasterImportCleanupTable = {
+  delete(): AnalysisMasterImportCleanupQuery;
+};
+
+export interface AnalysisMasterImportCleanupClient {
+  from(table: 'analysis_master_import_runs' | 'analysis_master_projects'): AnalysisMasterImportCleanupTable;
+}
+
 function createId(prefix: string, index: number, idFactory?: (prefix: string, index: number) => string): string {
   if (idFactory) {
     return idFactory(prefix, index);
@@ -121,6 +138,36 @@ export function buildAnalysisMasterImportRunCreate(
   });
 
   return { run, projects, items };
+}
+
+export async function cleanupAnalysisMasterImportRunArtifacts(
+  client: AnalysisMasterImportCleanupClient,
+  params: {
+    runId: string;
+    projectIds: string[];
+  }
+): Promise<{
+  runError?: unknown;
+  projectError?: unknown;
+}> {
+  const runResult = await (client
+    .from('analysis_master_import_runs')
+    .delete()
+    .eq('id', params.runId) as Promise<AnalysisMasterImportCleanupResult>);
+
+  let projectError: unknown = undefined;
+  if (params.projectIds.length > 0) {
+    const projectResult = await (client
+      .from('analysis_master_projects')
+      .delete()
+      .in('id', params.projectIds) as Promise<AnalysisMasterImportCleanupResult>);
+    projectError = projectResult?.error;
+  }
+
+  return {
+    runError: runResult?.error,
+    projectError,
+  };
 }
 
 export function buildAnalysisMasterItemClaimPatch(params: {

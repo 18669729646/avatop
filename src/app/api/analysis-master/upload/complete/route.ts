@@ -15,22 +15,24 @@ import { extractAudioFromBuffer } from '../extract-audio';
 
 import { promisify } from 'util';
 import { execFile as execFileSync } from 'child_process';
-const execFileAsync = promisify(execFileSync);
 
+const execFileAsync = promisify(execFileSync);
 const SESSION_DIR = path.join(os.tmpdir(), 'am-upload-sessions');
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+
+if (!fs.existsSync(SESSION_DIR)) {
+  fs.mkdirSync(SESSION_DIR, { recursive: true });
+}
 
 function getSessionFile(uploadId: string): string {
   return path.join(SESSION_DIR, `${uploadId}.json`);
 }
-
-const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 小时
 
 function loadSession(uploadId: string): Record<string, unknown> | null {
   const filePath = getSessionFile(uploadId);
   if (!fs.existsSync(filePath)) return null;
   try {
     const session = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-    // 过期清理
     if (Date.now() - (session.createdAt as number) > SESSION_TTL_MS) {
       fs.unlinkSync(filePath);
       return null;
@@ -48,6 +50,29 @@ function deleteSession(uploadId: string): void {
   }
 }
 
+async function cleanupUploadArtifacts(params: {
+  uploadId: string;
+  tempVideoPath?: string;
+  tempDir?: string;
+  s3Key?: string;
+  audioKey?: string;
+  deleteRemote?: boolean;
+}): Promise<void> {
+  if (params.deleteRemote && params.s3Key) {
+    await s3Storage.deleteFile(params.s3Key).catch(() => false);
+  }
+  if (params.deleteRemote && params.audioKey) {
+    await s3Storage.deleteFile(params.audioKey).catch(() => false);
+  }
+  if (params.tempVideoPath && fs.existsSync(params.tempVideoPath)) {
+    fs.unlinkSync(params.tempVideoPath);
+  }
+  if (params.tempDir && fs.existsSync(params.tempDir)) {
+    fs.rmSync(params.tempDir, { recursive: true, force: true });
+  }
+  deleteSession(params.uploadId);
+}
+
 export async function POST(request: NextRequest) {
   try {
     const auth = await authenticateRequest(request);
@@ -59,16 +84,16 @@ export async function POST(request: NextRequest) {
     const { uploadId, key } = body;
 
     if (!uploadId || !key) {
-      return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
+      return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
     }
 
     const session = loadSession(uploadId);
     if (!session) {
-      return NextResponse.json({ error: '上传会话不存在或已过期' }, { status: 400 });
+      return NextResponse.json({ error: 'Upload session not found or expired' }, { status: 400 });
     }
 
     if (session.userId !== auth.userId) {
-      return NextResponse.json({ error: '无权限' }, { status: 403 });
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
     const receivedChunks = (session.receivedChunks as number[]) || [];
@@ -77,192 +102,225 @@ export async function POST(request: NextRequest) {
 
     if (receivedChunks.length !== totalChunks) {
       return NextResponse.json({
-        error: '还有分片未上传',
+        error: 'Some chunks are still missing',
         received: receivedChunks.length,
         total: totalChunks,
       }, { status: 400 });
     }
 
-    logInfo('api', 'AnalysisMaster 开始合并分片', { uploadId, key, totalChunks }, auth.userId);
+    logInfo('api', 'AnalysisMaster merge chunks start', { uploadId, key, totalChunks }, auth.userId);
 
-    const chunks: Buffer[] = [];
     const tempDir = session.tempDir as string;
-
-    for (let i = 0; i < totalChunks; i++) {
-      const chunkPath = path.join(tempDir, `chunk-${i.toString().padStart(6, '0')}`);
-      if (!fs.existsSync(chunkPath)) {
-        return NextResponse.json({ error: `分片 ${i} 缺失` }, { status: 500 });
-      }
-      chunks.push(fs.readFileSync(chunkPath));
-    }
-
-    const mergedBuffer = Buffer.concat(chunks);
-
-    let videoDuration = 0;
-    let s3Key = '';
-    let url = '';
-    let tempVideoPath = '';
+    const tempVideoPath = path.join(tempDir, 'merged_video.mp4');
 
     try {
-      // 写入临时视频文件用于 ffprobe
-      tempVideoPath = path.join(tempDir, 'merged_video.mp4');
-      fs.writeFileSync(tempVideoPath, mergedBuffer);
-
-      try {
-        const { stdout } = await execFileAsync('ffprobe', [
-          '-v', 'quiet',
-          '-print_format', 'json',
-          '-show_format',
-          tempVideoPath,
-        ]);
-        const probeData = JSON.parse(stdout);
-        videoDuration = Math.round(parseFloat(probeData.format?.duration || '0'));
-        console.log(`[AnalysisMaster Chunk Complete] 视频时长: ${videoDuration}秒`);
-      } catch (e) {
-        console.warn('[AnalysisMaster Chunk Complete] 获取视频时长失败:', (e as Error).message);
+      const chunks: Buffer[] = [];
+      for (let i = 0; i < totalChunks; i++) {
+        const chunkPath = path.join(tempDir, `chunk-${i.toString().padStart(6, '0')}`);
+        if (!fs.existsSync(chunkPath)) {
+          return NextResponse.json({ error: `Chunk ${i} is missing` }, { status: 500 });
+        }
+        chunks.push(fs.readFileSync(chunkPath));
       }
 
-      // 写入 S3
-      s3Key = await s3Storage.uploadFile({
-        fileContent: mergedBuffer,
-        fileName: key as string,
-        contentType: 'video/mp4',
-      });
+      const mergedBuffer = Buffer.concat(chunks);
 
-      // 生成预签名 URL（7天有效期）
-      try {
-        url = await s3Storage.generatePresignedUrl({
-          key: s3Key,
-          expireTime: URL_EXPIRE_TIME,
-        });
-      } catch (e) {
-        console.log(`[AnalysisMaster Chunk Complete] 生成预签名 URL 失败（不影响结果）:`, e);
-      }
-
-      // 提取音频
+      let videoDuration = 0;
+      let s3Key = '';
+      let url = '';
       let audioKey = '';
       let audioUrl = '';
       let audioDuration = 0;
       let audioFileSize = 0;
+
       try {
-        const audioResult = await extractAudioFromBuffer(mergedBuffer, auth.userId, projectId || uploadId);
-        if (audioResult) {
-          audioKey = audioResult.audioKey;
-          audioDuration = audioResult.audioDuration || 0;
-          audioFileSize = audioResult.audioFileSize || 0;
+        fs.writeFileSync(tempVideoPath, mergedBuffer);
 
-          // 音频提取后检查配额（含音频大小）
-          const totalSize = mergedBuffer.length + audioFileSize;
-          const storageCheck = await checkStorageQuota(auth.userId, totalSize);
-          if (!storageCheck.allowed) {
-            await s3Storage.deleteFile(s3Key).catch(() => false);
-            await s3Storage.deleteFile(audioKey).catch(() => false);
-            fs.unlinkSync(tempVideoPath);
-            fs.rmSync(tempDir, { recursive: true, force: true });
-            deleteSession(uploadId);
-            return NextResponse.json({ error: storageCheck.error }, { status: 507 });
-          }
+        try {
+          const { stdout } = await execFileAsync('ffprobe', [
+            '-v',
+            'quiet',
+            '-print_format',
+            'json',
+            '-show_format',
+            tempVideoPath,
+          ]);
+          const probeData = JSON.parse(stdout);
+          videoDuration = Math.round(parseFloat(probeData.format?.duration || '0'));
+          console.log(`[AnalysisMaster Chunk Complete] Video duration: ${videoDuration}s`);
+        } catch (e) {
+          console.warn('[AnalysisMaster Chunk Complete] Failed to get video duration:', (e as Error).message);
+        }
 
-          try {
-            audioUrl = await s3Storage.generatePresignedUrl({ key: audioKey, expireTime: URL_EXPIRE_TIME });
-          } catch (e) {
-            console.log('[AnalysisMaster] 生成音频预签名 URL 失败:', e);
-          }
-          logInfo('api', 'AnalysisMaster 音频提取成功', { audioKey, duration: audioDuration, size: audioFileSize }, auth.userId);
-        }
-      } catch (e) {
-        console.log('[AnalysisMaster] 音频提取失败（不影响主流程）:', e);
-      }
-
-      // 插入或更新项目记录
-      if (projectId) {
-        const client = getSupabaseClient();
-        const upsertData: Record<string, unknown> = {
-          id: projectId,
-          user_id: auth.userId,
-          name: (session.name as string) || (session.fileName as string) || '未命名项目',
-          video_key: s3Key,
-          video_url: url,
-          status: 'draft',
-          source_type: typeof session.sourceUrl === 'string' ? 'link' : 'upload',
-          file_size: mergedBuffer.length,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        if (typeof session.sourceUrl === 'string') {
-          upsertData.source_url = session.sourceUrl;
-        }
-        if (videoDuration > 0) {
-          upsertData.video_duration = videoDuration;
-        }
-        if (audioKey) {
-          upsertData.audio_key = audioKey;
-          upsertData.audio_url = audioUrl;
-          upsertData.audio_duration = audioDuration;
-          upsertData.audio_file_size = audioFileSize;
-        }
-        const { error: upsertError } = await client
-          .from('analysis_master_projects')
-          .upsert(upsertData, { onConflict: 'id' });
-        if (upsertError) {
-          console.error('[AnalysisMaster Chunk Complete] 写入项目失败:', upsertError);
-          // 清理已上传的 S3 文件
-          if (s3Key) await s3Storage.deleteFile(s3Key).catch(() => false);
-          if (audioKey) await s3Storage.deleteFile(audioKey).catch(() => false);
-        }
-      }
-
-      // 清理临时文件
-      const importRunId = typeof session.importRunId === 'string' ? session.importRunId : '';
-      const importItemId = typeof session.importItemId === 'string' ? session.importItemId : '';
-      if (importRunId && importItemId) {
-        const client = getSupabaseClient();
-        await client
-          .from('analysis_master_import_items')
-          .update(buildAnalysisMasterItemSuccessPatch({}))
-          .eq('id', importItemId)
-          .eq('run_id', importRunId)
-          .eq('project_id', projectId)
-          .eq('user_id', auth.userId);
-        await refreshAnalysisMasterImportRunProgress(importRunId, client).catch(error => {
-          console.warn('[AnalysisMaster Chunk Complete] import run progress refresh failed:', error);
+        s3Key = await s3Storage.uploadFile({
+          fileContent: mergedBuffer,
+          fileName: key as string,
+          contentType: 'video/mp4',
         });
-        await enqueueAnalysisTaskForProject({
+
+        try {
+          url = await s3Storage.generatePresignedUrl({
+            key: s3Key,
+            expireTime: URL_EXPIRE_TIME,
+          });
+        } catch (e) {
+          console.log('[AnalysisMaster Chunk Complete] Failed to generate presigned URL (non-blocking):', e);
+        }
+
+        try {
+          const audioResult = await extractAudioFromBuffer(mergedBuffer, auth.userId, projectId || uploadId);
+          if (audioResult) {
+            audioKey = audioResult.audioKey;
+            audioDuration = audioResult.audioDuration || 0;
+            audioFileSize = audioResult.audioFileSize || 0;
+
+            const totalSize = mergedBuffer.length + audioFileSize;
+            const storageCheck = await checkStorageQuota(auth.userId, totalSize);
+            if (!storageCheck.allowed) {
+              await cleanupUploadArtifacts({
+                uploadId,
+                tempVideoPath,
+                tempDir,
+                s3Key,
+                audioKey,
+                deleteRemote: true,
+              });
+              return NextResponse.json({ error: storageCheck.error }, { status: 507 });
+            }
+
+            try {
+              audioUrl = await s3Storage.generatePresignedUrl({
+                key: audioKey,
+                expireTime: URL_EXPIRE_TIME,
+              });
+            } catch (e) {
+              console.log('[AnalysisMaster] Failed to generate audio presigned URL:', e);
+            }
+            logInfo('api', 'AnalysisMaster audio extracted successfully', { audioKey, duration: audioDuration, size: audioFileSize }, auth.userId);
+          }
+        } catch (e) {
+          console.log('[AnalysisMaster] Audio extraction failed (non-blocking):', e);
+        }
+
+        if (projectId) {
+          const client = getSupabaseClient();
+          const upsertData: Record<string, unknown> = {
+            id: projectId,
+            user_id: auth.userId,
+            name: (session.name as string) || (session.fileName as string) || 'Untitled project',
+            video_key: s3Key,
+            video_url: url,
+            status: 'draft',
+            source_type: typeof session.sourceUrl === 'string' ? 'link' : 'upload',
+            file_size: mergedBuffer.length,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+          if (typeof session.sourceUrl === 'string') {
+            upsertData.source_url = session.sourceUrl;
+          }
+          if (videoDuration > 0) {
+            upsertData.video_duration = videoDuration;
+          }
+          if (audioKey) {
+            upsertData.audio_key = audioKey;
+            upsertData.audio_url = audioUrl;
+            upsertData.audio_duration = audioDuration;
+            upsertData.audio_file_size = audioFileSize;
+          }
+
+          const { error: upsertError } = await client
+            .from('analysis_master_projects')
+            .upsert(upsertData, { onConflict: 'id' });
+          if (upsertError) {
+            console.error('[AnalysisMaster Chunk Complete] Failed to write project:', upsertError);
+            await cleanupUploadArtifacts({
+              uploadId,
+              tempVideoPath,
+              tempDir,
+              s3Key,
+              audioKey,
+              deleteRemote: true,
+            });
+            return NextResponse.json({ error: 'Failed to write project' }, { status: 500 });
+          }
+        }
+
+        const importRunId = typeof session.importRunId === 'string' ? session.importRunId : '';
+        const importItemId = typeof session.importItemId === 'string' ? session.importItemId : '';
+        if (importRunId && importItemId) {
+          const client = getSupabaseClient();
+          const { data: updatedItem, error: itemUpdateError } = await client
+            .from('analysis_master_import_items')
+            .update(buildAnalysisMasterItemSuccessPatch({}))
+            .eq('id', importItemId)
+            .eq('run_id', importRunId)
+            .eq('project_id', projectId)
+            .eq('user_id', auth.userId)
+            .select('id')
+            .single();
+
+          if (itemUpdateError || !updatedItem) {
+            console.error('[AnalysisMaster Chunk Complete] Failed to write import item:', itemUpdateError);
+            await cleanupUploadArtifacts({
+              uploadId,
+              tempVideoPath,
+              tempDir,
+              s3Key,
+              audioKey,
+              deleteRemote: true,
+            });
+            return NextResponse.json({ error: 'Failed to write import item' }, { status: 500 });
+          }
+
+          await refreshAnalysisMasterImportRunProgress(importRunId, client).catch(error => {
+            console.warn('[AnalysisMaster Chunk Complete] import run progress refresh failed:', error);
+          });
+
+          await enqueueAnalysisTaskForProject({
+            projectId,
+            userId: auth.userId,
+            authHeader: request.headers.get('authorization'),
+          }).catch(error => {
+            console.warn('[AnalysisMaster Chunk Complete] enqueue analysis failed:', error);
+          });
+        }
+
+        await cleanupUploadArtifacts({
+          uploadId,
+          tempVideoPath,
+          tempDir,
+        });
+
+        logInfo('api', 'AnalysisMaster chunk upload complete', { uploadId, s3Key, videoDuration }, auth.userId);
+
+        return NextResponse.json({
+          success: true,
           projectId,
-          userId: auth.userId,
-          authHeader: request.headers.get('authorization'),
-        }).catch(error => {
-          console.warn('[AnalysisMaster Chunk Complete] enqueue analysis failed:', error);
+          videoKey: s3Key,
+          videoUrl: url,
+          videoDuration,
         });
+      } catch (error) {
+        console.error('[AnalysisMaster Chunk Complete] Error:', error);
+        await cleanupUploadArtifacts({
+          uploadId,
+          tempVideoPath,
+          tempDir,
+          deleteRemote: true,
+        });
+        return NextResponse.json({ error: 'Failed to merge chunks' }, { status: 500 });
       }
-
-      if (tempVideoPath) {
-        fs.unlinkSync(tempVideoPath);
-      }
-      fs.rmSync(tempDir, { recursive: true, force: true });
-      deleteSession(uploadId);
-
-      logInfo('api', 'AnalysisMaster 分片上传完成', { uploadId, s3Key, videoDuration }, auth.userId);
-
-      return NextResponse.json({
-        success: true,
-        projectId,
-        videoKey: s3Key,
-        videoUrl: url,
-        videoDuration,
-      });
     } catch (error) {
-      console.error('[AnalysisMaster Chunk Complete] Error:', error);
-      if (tempVideoPath && fs.existsSync(tempVideoPath)) {
-        fs.unlinkSync(tempVideoPath);
-      }
-      if (tempDir && fs.existsSync(tempDir)) {
-        fs.rmSync(tempDir, { recursive: true, force: true });
-      }
-      deleteSession(uploadId);
-      return NextResponse.json({ error: '合并分片失败' }, { status: 500 });
+      await cleanupUploadArtifacts({
+        uploadId,
+        tempVideoPath,
+        tempDir,
+        deleteRemote: true,
+      });
+      return NextResponse.json({ error: 'Server error' }, { status: 500 });
     }
   } catch (error) {
-    return NextResponse.json({ error: '服务器错误' }, { status: 500 });
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
   }
 }

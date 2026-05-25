@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   buildAnalysisMasterImportRunCreate,
+  cleanupAnalysisMasterImportRunArtifacts,
   buildAnalysisMasterImportRunProgress,
   buildAnalysisMasterImportRunToken,
   buildAnalysisMasterItemClaimPatch,
@@ -105,5 +106,47 @@ describe('analysis master import runs', () => {
     });
 
     assert.equal(buildAnalysisMasterImportRunToken('run-1', 'token-1'), 'run-1:token-1');
+  });
+
+  it('cleans up import run artifacts by deleting run before projects', async () => {
+    const calls: string[] = [];
+    const client = {
+      from(table: 'analysis_master_import_runs' | 'analysis_master_projects') {
+        calls.push(`from:${table}`);
+        return {
+          delete() {
+            calls.push(`delete:${table}`);
+            return {
+              eq(column: string, value: unknown) {
+                calls.push(`eq:${table}:${column}:${String(value)}`);
+                return Promise.resolve({ error: null });
+              },
+              in(column: string, values: unknown[]) {
+                calls.push(`in:${table}:${column}:${values.map(value => String(value)).join(',')}`);
+                return Promise.resolve({ error: null });
+              },
+            };
+          },
+        };
+      },
+    };
+
+    const result = await cleanupAnalysisMasterImportRunArtifacts(client, {
+      runId: 'run-1',
+      projectIds: ['project-1', 'project-2'],
+    });
+
+    assert.deepEqual(result, {
+      runError: null,
+      projectError: null,
+    });
+    assert.deepEqual(calls, [
+      'from:analysis_master_import_runs',
+      'delete:analysis_master_import_runs',
+      'eq:analysis_master_import_runs:id:run-1',
+      'from:analysis_master_projects',
+      'delete:analysis_master_projects',
+      'in:analysis_master_projects:id:project-1,project-2',
+    ]);
   });
 });
