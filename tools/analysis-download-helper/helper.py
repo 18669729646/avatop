@@ -291,7 +291,7 @@ def upload_video(payload, file_path):
     token = payload["authToken"]
     source_url = payload["sourceUrl"]
     project_name = payload.get("projectName") or "链接分析项目"
-    chunk_size = int(payload.get("chunkSize") or 5 * 1024 * 1024)
+    chunk_size = int(payload.get("chunkSize") or 512 * 1024)
     max_bytes = int(payload.get("maxBytes") or 100 * 1024 * 1024)
     file_size = file_path.stat().st_size
 

@@ -19,14 +19,14 @@ describe('analysis master local helper request', () => {
     });
 
     assert.equal(ANALYSIS_LOCAL_HELPER_URL, 'http://127.0.0.1:17321');
-    assert.equal(ANALYSIS_LOCAL_HELPER_CHUNK_SIZE, 1024 * 1024);
+    assert.equal(ANALYSIS_LOCAL_HELPER_CHUNK_SIZE, 512 * 1024);
     assert.equal(ANALYSIS_LOCAL_HELPER_MAX_BYTES, 100 * 1024 * 1024);
     assert.deepEqual(request, {
       sourceUrl: 'https://www.tiktok.com/@maker/video/123',
       projectName: 'Test Project',
       saasBaseUrl: 'https://app.example.com',
       authToken: 'jwt-token',
-      chunkSize: 1024 * 1024,
+      chunkSize: 512 * 1024,
       maxBytes: 100 * 1024 * 1024,
     });
   });
