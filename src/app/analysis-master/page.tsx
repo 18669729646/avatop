@@ -1,7 +1,6 @@
 ﻿'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { AppLayout } from '@/components/app-layout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -29,14 +28,12 @@ import { ScriptRemakeDetailModal } from '@/components/script-remake-detail-modal
 import {
   ANALYSIS_LOCAL_HELPER_URL,
 } from '@/lib/analysis-master-local-helper';
-import { runAnalysisMasterLocalImport } from '@/lib/analysis-master-local-import';
-import { runAnalysisMasterBatchLocalImport, type AnalysisMasterBatchImportSummary } from '@/lib/analysis-master-import-queue';
+import type { AnalysisMasterBatchImportSummary } from '@/lib/analysis-master-import-queue';
 
 const ANALYSIS_MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 const ANALYSIS_HELPER_DOWNLOAD_URL = '/analysis-helper/analysis-download-helper-0.1.5.zip';
 
 const CHUNK_SIZE = 5 * 1024 * 1024;
-const PROJECT_PAGE_SIZE = 12;
 
 interface UploadState {
   phase: 'idle' | 'uploading' | 'done' | 'error';
@@ -151,6 +148,38 @@ function createClientRequestId() {
   return `amreq-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function summarizeImportRun(run: Record<string, unknown>): AnalysisMasterBatchImportSummary {
+  const items = Array.isArray(run.items) ? run.items as Array<Record<string, unknown>> : [];
+  const failedItems = items
+    .filter(item => item.status === 'failed')
+    .map(item => ({
+      sourceUrl: String(item.source_url || item.sourceUrl || ''),
+      error: String(item.error || '视频解析失败，请检查当前网络环境后重试。'),
+    }));
+  const completed = Number(run.completed_items || run.completedItems || items.filter(item => item.status === 'completed').length || 0);
+  const failed = Number(run.failed_items || run.failedItems || failedItems.length || 0);
+  const total = Number(run.total_items || run.totalItems || items.length || 0);
+  return {
+    batchId: String(run.id || run.runId || ''),
+    sourceFileName: typeof run.source_file_name === 'string' ? run.source_file_name : undefined,
+    total,
+    processed: completed + failed,
+    createdRows: completed,
+    failedRows: failed,
+    failedItems,
+    rowResults: items.map((item, index) => ({
+      index: Number(item.row_index ?? index),
+      sourceUrl: String(item.source_url || item.sourceUrl || ''),
+      attempts: Number(item.attempts || 0),
+      status: String(item.status || 'pending') as never,
+      projectId: typeof item.project_id === 'string' ? item.project_id : undefined,
+      error: typeof item.error === 'string' ? item.error : null,
+    })),
+    status: String(run.status || 'running') as never,
+    error: typeof run.error === 'string' ? run.error : undefined,
+  };
+}
+
 const statusLabels: Record<string, string> = {
   downloading: '下载中',
   draft: '待分析',
@@ -189,6 +218,7 @@ const batchStatusLabels: Record<string, string> = {
   progress: '处理中',
   retrying: '重试中',
   success: '已完成',
+  completed: '已完成',
   failed: '失败',
 };
 
@@ -404,7 +434,6 @@ ProjectPanel.displayName = 'ProjectPanel';
 
 
 export default function AnalysisMasterPage() {
-  const router = useRouter();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [draftProjects, setDraftProjects] = useState<AnalysisMasterDraftProject[]>([]);
@@ -473,6 +502,56 @@ export default function AnalysisMasterPage() {
     : 0;
   const batchStatus = batchSummary?.status || 'running';
 
+  const refreshImportRun = useCallback(async (runId: string) => {
+    const response = await authFetch(`/api/analysis-master/import-runs/${encodeURIComponent(runId)}`);
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || '获取导入任务失败');
+    }
+    const summary = summarizeImportRun(data.data as Record<string, unknown>);
+    setBatchSummary(summary);
+    await mutateProjects().catch(() => undefined);
+    return summary;
+  }, [mutateProjects]);
+
+  const startHelperImportRun = useCallback(async (payload: {
+    runId: string;
+    runnerToken: string;
+  }) => {
+    const healthController = new AbortController();
+    const healthTimeout = window.setTimeout(() => healthController.abort(), 2000);
+    try {
+      const healthRes = await fetch(`${ANALYSIS_LOCAL_HELPER_URL}/health`, {
+        signal: healthController.signal,
+      });
+      if (!healthRes.ok) {
+        throw new Error('helper unavailable');
+      }
+      setLocalHelperDisconnected(false);
+    } catch {
+      setLocalHelperDisconnected(true);
+      throw new Error('解析组件未连接，请启动后重试；也可以直接上传视频继续分析。');
+    } finally {
+      window.clearTimeout(healthTimeout);
+    }
+
+    const response = await fetch(`${ANALYSIS_LOCAL_HELPER_URL}/v1/import-run/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        runId: payload.runId,
+        runnerToken: payload.runnerToken,
+        saasBaseUrl: window.location.origin,
+        authToken: getAuthToken(),
+        concurrency: 3,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.success === false) {
+      throw new Error(data.error || '启动解析组件失败');
+    }
+  }, []);
+
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem('analysis-master-batch-summary');
@@ -506,6 +585,18 @@ export default function AnalysisMasterPage() {
       }
     } catch {}
   }, [batchSummary]);
+
+  useEffect(() => {
+    if (!batchSummary?.batchId || !['pending', 'running'].includes(batchSummary.status)) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      refreshImportRun(batchSummary.batchId).catch(error => {
+        console.warn('[Analysis Master] refresh import run failed:', error);
+      });
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [batchSummary?.batchId, batchSummary?.status, refreshImportRun]);
 
   useEffect(() => {
     if (!user?.id) {
@@ -566,7 +657,7 @@ export default function AnalysisMasterPage() {
     } catch (err) {
       console.error(`[Analysis Master] 获取复刻状态失败: ${projectId}`, err);
     }
-  }, [authFetch, setRemakeStatuses]);
+  }, []);
 
   // 获取已完成项目的复刻状态，并轮询正在进行中的任务
   useEffect(() => {
@@ -642,34 +733,29 @@ export default function AnalysisMasterPage() {
     ]);
     setSelectedId(clientRequestId);
     try {
-      const healthController = new AbortController();
-      const healthTimeout = window.setTimeout(() => healthController.abort(), 2000);
-      try {
-        const healthRes = await fetch(`${ANALYSIS_LOCAL_HELPER_URL}/health`, {
-          signal: healthController.signal,
-        });
-        if (!healthRes.ok) {
-          throw new Error('helper unavailable');
-        }
-        setLocalHelperDisconnected(false);
-      } catch {
-        setLocalHelperDisconnected(true);
-        throw new Error('解析组件未连接，请启动后重试；也可以直接上传视频继续分析。');
-      } finally {
-        window.clearTimeout(healthTimeout);
-      }
-
-      const result = await runAnalysisMasterLocalImport(
-        {
+      const createRunRes = await authFetch('/api/analysis-master/import-runs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'single',
           sourceUrl: url,
-          projectName: projectName.trim() || '链接分析项目',
-          saasBaseUrl: window.location.origin,
-          authToken: getAuthToken(),
-        },
-        {
-          authFetch,
-        }
-      );
+          importMetadata: {
+            projectName: projectName.trim() || '链接分析项目',
+          },
+        }),
+      });
+      const createRunData = await createRunRes.json();
+      if (!createRunRes.ok) throw new Error(createRunData.error || '创建导入任务失败');
+      const runData = createRunData.data as {
+        runId: string;
+        runnerToken: string;
+        items?: Array<{ projectId: string }>;
+      };
+
+      await startHelperImportRun({
+        runId: runData.runId,
+        runnerToken: runData.runnerToken,
+      });
 
       setSourceUrl('');
       setProjectName('');
@@ -678,8 +764,10 @@ export default function AnalysisMasterPage() {
       await mutateProjects().catch(refreshErr => {
         console.warn('[从链接导入] 列表刷新失败，但项目已创建:', refreshErr);
       });
-      setSelectedId(String(result.projectId));
-      console.log('[从链接导入] 成功, projectId=', result.projectId);
+      const projectId = runData.items?.[0]?.projectId;
+      if (projectId) setSelectedId(String(projectId));
+      await refreshImportRun(runData.runId).catch(() => undefined);
+      console.log('[从链接导入] 已交给后台编排, runId=', runData.runId);
     } catch (err) {
       const msg = err instanceof Error ? err.message : '创建失败';
       console.error('[从链接导入] 失败:', msg);
@@ -788,22 +876,20 @@ export default function AnalysisMasterPage() {
     try {
       const formData = new FormData();
       formData.append('file', batchFile);
-      const response = await authFetch('/api/analysis-master/batch-import', {
+      const response = await authFetch('/api/analysis-master/import-runs', {
         method: 'POST',
         body: formData,
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '批量导入失败');
       const batchData = data.data as {
-        batchId: string;
-        sourceFileName?: string;
+        runId: string;
+        runnerToken: string;
         total: number;
         limit: number;
-        imports: Array<{ sourceUrl: string; metadata: Record<string, string> }>;
       };
       const initialSummary: AnalysisMasterBatchImportSummary = {
-        batchId: batchData.batchId,
-        sourceFileName: batchData.sourceFileName,
+        batchId: batchData.runId,
         total: batchData.total,
         processed: 0,
         createdRows: 0,
@@ -813,23 +899,11 @@ export default function AnalysisMasterPage() {
         status: 'running',
       };
       setBatchSummary(initialSummary);
-      const result = await runAnalysisMasterBatchLocalImport(
-        {
-          batchId: batchData.batchId,
-          sourceFileName: batchData.sourceFileName,
-          imports: batchData.imports,
-          saasBaseUrl: window.location.origin,
-          authToken: getAuthToken(),
-          concurrency: 3,
-          maxRetries: 1,
-        },
-        {
-          authFetch,
-          helperFetch: fetch,
-          onProgress: setBatchSummary,
-        }
-      );
-      setBatchSummary(result);
+      await startHelperImportRun({
+        runId: batchData.runId,
+        runnerToken: batchData.runnerToken,
+      });
+      await refreshImportRun(batchData.runId).catch(() => undefined);
       setBatchFile(null);
       await mutateProjects();
     } catch (err) {

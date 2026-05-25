@@ -69,6 +69,8 @@ export async function POST(request: NextRequest) {
       name,
       sourceUrl,
       projectId: typeof body.projectId === 'string' && body.projectId.trim() ? body.projectId.trim() : undefined,
+      importRunId: typeof body.importRunId === 'string' && body.importRunId.trim() ? body.importRunId.trim() : undefined,
+      importItemId: typeof body.importItemId === 'string' && body.importItemId.trim() ? body.importItemId.trim() : undefined,
       now: typeof body.now === 'string' ? body.now : undefined,
     });
     const { uploadId, projectId, key, tempDir, session } = initSession;

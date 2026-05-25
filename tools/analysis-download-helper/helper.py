@@ -21,6 +21,8 @@ YTDLP_SINGLE_FILE_FORMAT = "best[ext=mp4][acodec!=none][vcodec!=none]/best[acode
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 180
 COMPLETE_UPLOAD_TIMEOUT_SECONDS = 600
 LOG_LOCK = threading.Lock()
+RUNNERS_LOCK = threading.Lock()
+ACTIVE_RUNNERS = set()
 
 if os.name == "nt":
     user32 = ctypes.windll.user32
@@ -234,6 +236,21 @@ def post_json(url, token, payload, timeout=DEFAULT_REQUEST_TIMEOUT_SECONDS):
         return json.loads(resp.read().decode("utf-8"))
 
 
+def post_runner_json(url, runner_token, payload, timeout=DEFAULT_REQUEST_TIMEOUT_SECONDS):
+    body = json_bytes(payload)
+    req = urlrequest.Request(
+        url,
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {runner_token}",
+            "Content-Type": "application/json",
+        },
+    )
+    with urlrequest.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
 def post_chunk(url, token, chunk, timeout=DEFAULT_REQUEST_TIMEOUT_SECONDS):
     req = urlrequest.Request(
         url,
@@ -312,6 +329,8 @@ def upload_video(payload, file_path):
             "name": project_name,
             "sourceUrl": source_url,
             "projectId": payload.get("projectId"),
+            "importRunId": payload.get("importRunId"),
+            "importItemId": payload.get("importItemId"),
         },
     )
     data = init_data.get("data") or {}
@@ -346,6 +365,72 @@ def upload_video(payload, file_path):
     )
     helper_log("complete upload done")
     return complete_data.get("data") or complete_data
+
+
+def fail_import_item(saas_base, runner_token, run_id, item_id, message):
+    try:
+        post_runner_json(
+            f"{saas_base}/api/analysis-master/import-runs/{run_id}/items/{item_id}/fail",
+            runner_token,
+            {"error": message, "maxRetries": 1},
+        )
+    except Exception as exc:
+        helper_log(f"item fail callback failed: {item_id} {exc}")
+
+
+def run_import_runner(payload):
+    run_id = payload["runId"]
+    saas_base = payload["saasBaseUrl"].rstrip("/")
+    runner_token = payload["runnerToken"]
+    auth_token = payload["authToken"]
+    concurrency = max(1, min(int(payload.get("concurrency") or 3), 3))
+    worker_id = payload.get("workerId") or f"helper-{VERSION}"
+
+    helper_log(f"import run start: {run_id}")
+    try:
+        while True:
+            claim = post_runner_json(
+                f"{saas_base}/api/analysis-master/import-runs/{run_id}/claim",
+                runner_token,
+                {"workerId": worker_id, "limit": concurrency},
+            )
+            items = (claim.get("data") or {}).get("items") or []
+            if not items:
+                helper_log(f"import run empty: {run_id}")
+                break
+
+            for item in items:
+                item_id = item["id"]
+                item_payload = {
+                    "sourceUrl": item["sourceUrl"],
+                    "projectName": (item.get("metadata") or {}).get("name") or (item.get("metadata") or {}).get("title") or "链接分析项目",
+                    "saasBaseUrl": saas_base,
+                    "authToken": auth_token,
+                    "chunkSize": int(payload.get("chunkSize") or 512 * 1024),
+                    "maxBytes": int(payload.get("maxBytes") or 100 * 1024 * 1024),
+                    "projectId": item["projectId"],
+                    "importRunId": run_id,
+                    "importItemId": item_id,
+                }
+                try:
+                    helper_log(f"import item start: {item_id}")
+                    with tempfile.TemporaryDirectory(prefix="am-helper-") as tmp:
+                        file_path = download_video(item_payload["sourceUrl"], tmp)
+                        upload_video(item_payload, file_path)
+                    helper_log(f"import item done: {item_id}")
+                except subprocess.TimeoutExpired:
+                    helper_log(f"import item timeout: {item_id}")
+                    fail_import_item(saas_base, runner_token, run_id, item_id, "视频解析超时，请检查当前网络环境后重试。")
+                except subprocess.CalledProcessError as exc:
+                    helper_log(f"import item download failed: {item_id} {exc.stderr or exc}")
+                    fail_import_item(saas_base, runner_token, run_id, item_id, "视频解析失败，请检查当前网络环境后重试。")
+                except Exception as exc:
+                    helper_log(f"import item failed: {item_id} {exc}")
+                    fail_import_item(saas_base, runner_token, run_id, item_id, str(exc) or "视频解析失败，请检查当前网络环境后重试。")
+    finally:
+        with RUNNERS_LOCK:
+            ACTIVE_RUNNERS.discard(run_id)
+        helper_log(f"import run stopped: {run_id}")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -386,6 +471,34 @@ class Handler(BaseHTTPRequestHandler):
         helper_log("health response sent")
 
     def do_POST(self):
+        if self.path == "/v1/import-run/start":
+            try:
+                helper_log("import run request received")
+                length = int(self.headers.get("Content-Length") or "0")
+                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                run_id = payload["runId"]
+                origin = self.headers.get("Origin")
+                saas_origin = "{uri.scheme}://{uri.netloc}".format(uri=urlparse(payload["saasBaseUrl"]))
+                if origin and origin != saas_origin:
+                    self.send_json(403, {"success": False, "error": "请求来源不被允许。"})
+                    return
+
+                with RUNNERS_LOCK:
+                    if run_id not in ACTIVE_RUNNERS:
+                        ACTIVE_RUNNERS.add(run_id)
+                        threading.Thread(
+                            target=run_import_runner,
+                            args=(payload,),
+                            name=f"analysis-import-run-{run_id}",
+                            daemon=True,
+                        ).start()
+
+                self.send_json(200, {"success": True, "data": {"runId": run_id, "status": "started"}})
+            except Exception as exc:
+                helper_log(f"import run request failed: {exc}")
+                self.send_json(500, {"success": False, "error": str(exc) or "启动批量解析失败"})
+            return
+
         if self.path != "/v1/download":
             self.send_json(404, {"success": False, "error": "Not found"})
             return

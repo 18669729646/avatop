@@ -5,6 +5,9 @@ import { logInfo } from '@/lib/logger';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { checkStorageQuota } from '@/lib/storage-quota';
 import { URL_EXPIRE_TIME } from '@/lib/storage-types';
+import { buildAnalysisMasterItemSuccessPatch } from '@/lib/analysis-master-import-runs';
+import { refreshAnalysisMasterImportRunProgress } from '@/lib/analysis-master-import-run-db';
+import { enqueueAnalysisTaskForProject } from '@/lib/analysis-master-queue';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -210,6 +213,29 @@ export async function POST(request: NextRequest) {
       }
 
       // 清理临时文件
+      const importRunId = typeof session.importRunId === 'string' ? session.importRunId : '';
+      const importItemId = typeof session.importItemId === 'string' ? session.importItemId : '';
+      if (importRunId && importItemId) {
+        const client = getSupabaseClient();
+        await client
+          .from('analysis_master_import_items')
+          .update(buildAnalysisMasterItemSuccessPatch({}))
+          .eq('id', importItemId)
+          .eq('run_id', importRunId)
+          .eq('project_id', projectId)
+          .eq('user_id', auth.userId);
+        await refreshAnalysisMasterImportRunProgress(importRunId, client).catch(error => {
+          console.warn('[AnalysisMaster Chunk Complete] import run progress refresh failed:', error);
+        });
+        await enqueueAnalysisTaskForProject({
+          projectId,
+          userId: auth.userId,
+          authHeader: request.headers.get('authorization'),
+        }).catch(error => {
+          console.warn('[AnalysisMaster Chunk Complete] enqueue analysis failed:', error);
+        });
+      }
+
       if (tempVideoPath) {
         fs.unlinkSync(tempVideoPath);
       }

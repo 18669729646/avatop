@@ -745,6 +745,54 @@ export const analysisMasterProjects = pgTable(
 );
 
 // 分析大师脚本复刻表
+export const analysisMasterImportRuns = pgTable(
+  "analysis_master_import_runs",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    userId: varchar("user_id", { length: 64 }).notNull().references(() => users.id, { onDelete: 'cascade' }),
+    mode: varchar("mode", { length: 16 }).default('single').notNull(),
+    sourceFileName: text("source_file_name"),
+    status: varchar("status", { length: 32 }).default('pending').notNull(),
+    totalItems: integer("total_items").default(0).notNull(),
+    completedItems: integer("completed_items").default(0).notNull(),
+    failedItems: integer("failed_items").default(0).notNull(),
+    runnerToken: text("runner_token").notNull(),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true, mode: 'string' }),
+  },
+  (table) => [
+    index("analysis_master_import_runs_user_idx").on(table.userId, table.updatedAt),
+    index("analysis_master_import_runs_status_idx").on(table.status),
+  ]
+);
+
+export const analysisMasterImportItems = pgTable(
+  "analysis_master_import_items",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    runId: varchar("run_id", { length: 64 }).notNull().references(() => analysisMasterImportRuns.id, { onDelete: 'cascade' }),
+    userId: varchar("user_id", { length: 64 }).notNull().references(() => users.id, { onDelete: 'cascade' }),
+    projectId: varchar("project_id", { length: 64 }).notNull().references(() => analysisMasterProjects.id, { onDelete: 'cascade' }),
+    sourceUrl: text("source_url").notNull(),
+    rowIndex: integer("row_index").default(0).notNull(),
+    status: varchar("status", { length: 32 }).default('pending').notNull(),
+    attempts: integer("attempts").default(0).notNull(),
+    metadata: jsonb("metadata").$type<Record<string, string>>().default({}),
+    error: text("error"),
+    workerId: varchar("worker_id", { length: 128 }),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: 'string' }),
+    completedAt: timestamp("completed_at", { withTimezone: true, mode: 'string' }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("analysis_master_import_items_run_idx").on(table.runId, table.rowIndex),
+    index("analysis_master_import_items_status_idx").on(table.runId, table.status),
+  ]
+);
+
 export const analysisMasterScriptRemakes = pgTable(
   "analysis_master_script_remakes",
   {

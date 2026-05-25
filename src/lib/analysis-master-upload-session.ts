@@ -11,6 +11,8 @@ export interface AnalysisMasterUploadInitSessionParams {
   name?: string;
   sourceUrl?: string;
   projectId?: string;
+  importRunId?: string;
+  importItemId?: string;
   now?: string;
 }
 
@@ -52,6 +54,8 @@ export function buildAnalysisMasterUploadInitSession(
       fileSize: params.fileSize,
       name: params.name || params.fileName,
       sourceUrl: typeof params.sourceUrl === 'string' && params.sourceUrl.trim() ? params.sourceUrl.trim() : undefined,
+      importRunId: typeof params.importRunId === 'string' && params.importRunId.trim() ? params.importRunId.trim() : undefined,
+      importItemId: typeof params.importItemId === 'string' && params.importItemId.trim() ? params.importItemId.trim() : undefined,
       chunkSize: params.chunkSize,
       totalChunks: params.totalChunks,
       receivedChunks: [] as number[],

@@ -41,10 +41,12 @@ describe('analysis master local helper request', () => {
     const pageSource = readFileSync('src/app/analysis-master/page.tsx', 'utf8');
     const helperImportSource = readFileSync('src/lib/analysis-master-local-import.ts', 'utf8');
     const helperSource = readFileSync('src/lib/analysis-master-local-helper.ts', 'utf8');
+    const helperPySource = readFileSync('tools/analysis-download-helper/helper.py', 'utf8');
 
-    assert.match(pageSource, /runAnalysisMasterLocalImport/);
+    assert.match(pageSource, /\/v1\/import-run\/start/);
     assert.match(helperImportSource, /ANALYSIS_LOCAL_HELPER_CHUNK_SIZE/);
     assert.match(helperSource, /ANALYSIS_LOCAL_HELPER_CHUNK_SIZE/);
+    assert.match(helperPySource, /512 \* 1024/);
     assert.match(pageSource, /const CHUNK_SIZE = 5 \* 1024 \* 1024/);
   });
 
