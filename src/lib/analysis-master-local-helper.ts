@@ -1,5 +1,6 @@
 export const ANALYSIS_LOCAL_HELPER_URL = 'http://127.0.0.1:17321';
 export const ANALYSIS_LOCAL_HELPER_MAX_BYTES = 100 * 1024 * 1024;
+export const ANALYSIS_LOCAL_HELPER_CHUNK_SIZE = 1024 * 1024;
 
 export interface AnalysisLocalHelperRequest {
   sourceUrl: string;

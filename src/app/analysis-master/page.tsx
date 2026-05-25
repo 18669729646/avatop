@@ -28,6 +28,7 @@ import {
 import { ScriptRemakePanel } from '@/components/script-remake-panel';
 import { ScriptRemakeDetailModal } from '@/components/script-remake-detail-modal';
 import {
+  ANALYSIS_LOCAL_HELPER_CHUNK_SIZE,
   ANALYSIS_LOCAL_HELPER_URL,
   buildAnalysisLocalHelperRequest,
 } from '@/lib/analysis-master-local-helper';
@@ -654,7 +655,7 @@ export default function AnalysisMasterPage() {
         projectName: projectName.trim() || '链接分析项目',
         saasBaseUrl: window.location.origin,
         authToken: getAuthToken(),
-        chunkSize: CHUNK_SIZE,
+        chunkSize: ANALYSIS_LOCAL_HELPER_CHUNK_SIZE,
       });
 
       const healthController = new AbortController();
