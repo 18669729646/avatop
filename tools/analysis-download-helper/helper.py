@@ -6,11 +6,14 @@ import json
 import shutil
 import subprocess
 import tempfile
+import time
 
 HOST = "127.0.0.1"
 PORT = 17321
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 YTDLP_SINGLE_FILE_FORMAT = "best[ext=mp4][acodec!=none][vcodec!=none]/best[acodec!=none][vcodec!=none]/best"
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 180
+COMPLETE_UPLOAD_TIMEOUT_SECONDS = 600
 
 
 def app_dir():
@@ -39,7 +42,11 @@ def json_bytes(data):
     return json.dumps(data, ensure_ascii=False).encode("utf-8")
 
 
-def post_json(url, token, payload):
+def helper_log(message):
+    print(f"[helper] {time.strftime('%Y-%m-%d %H:%M:%S')} {message}", flush=True)
+
+
+def post_json(url, token, payload, timeout=DEFAULT_REQUEST_TIMEOUT_SECONDS):
     body = json_bytes(payload)
     req = urlrequest.Request(
         url,
@@ -50,11 +57,11 @@ def post_json(url, token, payload):
             "Content-Type": "application/json",
         },
     )
-    with urlrequest.urlopen(req, timeout=120) as resp:
+    with urlrequest.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def post_chunk(url, token, chunk):
+def post_chunk(url, token, chunk, timeout=DEFAULT_REQUEST_TIMEOUT_SECONDS):
     req = urlrequest.Request(
         url,
         data=chunk,
@@ -64,7 +71,7 @@ def post_chunk(url, token, chunk):
             "Content-Type": "application/octet-stream",
         },
     )
-    with urlrequest.urlopen(req, timeout=120) as resp:
+    with urlrequest.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -81,6 +88,7 @@ def download_video(source_url, output_dir):
         raise RuntimeError("解析组件缺少下载引擎，请重新安装解析组件。")
 
     output_template = str(Path(output_dir) / "source.%(ext)s")
+    helper_log("download start")
     command = [
         yt_dlp,
         "--no-playlist",
@@ -100,7 +108,9 @@ def download_video(source_url, output_dir):
         text=True,
         timeout=300,
     )
-    return find_downloaded_file(output_dir)
+    file_path = find_downloaded_file(output_dir)
+    helper_log(f"download done: {file_path.name} {file_path.stat().st_size} bytes")
+    return file_path
 
 
 def upload_video(payload, file_path):
@@ -117,6 +127,7 @@ def upload_video(payload, file_path):
     if file_size > max_bytes:
         raise RuntimeError("视频文件不能超过 100MB。")
 
+    helper_log(f"upload init start: {file_path.name} {file_size} bytes")
     init_data = post_json(
         f"{saas_base}/api/analysis-master/upload/init",
         token,
@@ -134,16 +145,20 @@ def upload_video(payload, file_path):
     project_id = data["projectId"]
     key = data["key"]
     total_chunks = int(data["totalChunks"])
+    helper_log(f"upload init done: uploadId={upload_id} chunks={total_chunks}")
 
     with file_path.open("rb") as f:
         for index in range(total_chunks):
             chunk = f.read(chunk_size)
+            helper_log(f"chunk upload start: {index + 1}/{total_chunks}")
             post_chunk(
                 f"{saas_base}/api/analysis-master/upload/upload?uploadId={upload_id}&chunkIndex={index}",
                 token,
                 chunk,
             )
+            helper_log(f"chunk upload done: {index + 1}/{total_chunks}")
 
+    helper_log("complete upload start")
     complete_data = post_json(
         f"{saas_base}/api/analysis-master/upload/complete",
         token,
@@ -153,7 +168,9 @@ def upload_video(payload, file_path):
             "key": key,
             "name": project_name,
         },
+        timeout=COMPLETE_UPLOAD_TIMEOUT_SECONDS,
     )
+    helper_log("complete upload done")
     return complete_data.get("data") or complete_data
 
 
@@ -188,6 +205,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         try:
+            helper_log("request received")
             length = int(self.headers.get("Content-Length") or "0")
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
             origin = self.headers.get("Origin")
@@ -200,11 +218,15 @@ class Handler(BaseHTTPRequestHandler):
                 file_path = download_video(payload["sourceUrl"], tmp)
                 result = upload_video(payload, file_path)
             self.send_json(200, {"success": True, "data": result})
+            helper_log("request done")
         except subprocess.TimeoutExpired:
+            helper_log("download timeout")
             self.send_json(500, {"success": False, "error": "视频解析超时，请检查当前网络环境后重试。"})
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as exc:
+            helper_log(f"download failed: {exc.stderr or exc}")
             self.send_json(500, {"success": False, "error": "视频解析失败，请检查当前网络环境后重试。"})
         except Exception as exc:
+            helper_log(f"request failed: {exc}")
             self.send_json(500, {"success": False, "error": str(exc) or "视频解析失败，请检查当前网络环境后重试。"})
 
 

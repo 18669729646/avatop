@@ -15,10 +15,13 @@ test('analysis download helper is packaged as a lightweight yt-dlp-only build', 
   assert.doesNotMatch(helper, /--merge-output-format/);
   assert.doesNotMatch(helper, /--ffmpeg-location/);
   assert.match(helper, /Access-Control-Allow-Private-Network/);
+  assert.match(helper, /COMPLETE_UPLOAD_TIMEOUT_SECONDS = 600/);
+  assert.match(helper, /helper_log\("complete upload start"/);
+  assert.match(helper, /helper_log\("complete upload done"/);
 
   assert.doesNotMatch(buildScript, /FfmpegPath/);
   assert.doesNotMatch(buildScript, /ffmpeg\.exe/);
 
-  assert.match(page, /analysis-download-helper-0\.1\.2\.zip/);
+  assert.match(page, /analysis-download-helper-0\.1\.3\.zip/);
   assert.match(page, /下载轻量解析组件/);
 });
