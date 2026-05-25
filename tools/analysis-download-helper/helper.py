@@ -10,7 +10,7 @@ import time
 
 HOST = "127.0.0.1"
 PORT = 17321
-VERSION = "0.1.3"
+VERSION = "0.1.4"
 YTDLP_SINGLE_FILE_FORMAT = "best[ext=mp4][acodec!=none][vcodec!=none]/best[acodec!=none][vcodec!=none]/best"
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 180
 COMPLETE_UPLOAD_TIMEOUT_SECONDS = 600
@@ -177,18 +177,19 @@ def upload_video(payload, file_path):
 class Handler(BaseHTTPRequestHandler):
     def send_json(self, status, data):
         body = json_bytes(data)
-        origin = self.headers.get("Origin")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        if origin:
-            self.send_header("Access-Control-Allow-Origin", origin)
-            self.send_header("Vary", "Origin")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Vary", "Origin")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
         self.send_header("Access-Control-Allow-Private-Network", "true")
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionAbortedError, OSError) as exc:
+            helper_log(f"response dropped: {exc}")
 
     def do_OPTIONS(self):
         self.send_json(200, {"success": True})
@@ -217,7 +218,11 @@ class Handler(BaseHTTPRequestHandler):
             with tempfile.TemporaryDirectory(prefix="am-helper-") as tmp:
                 file_path = download_video(payload["sourceUrl"], tmp)
                 result = upload_video(payload, file_path)
-            self.send_json(200, {"success": True, "data": result})
+            try:
+                self.send_json(200, {"success": True, "data": result})
+            except (BrokenPipeError, ConnectionAbortedError, OSError) as exc:
+                helper_log(f"success response dropped: {exc}")
+                return
             helper_log("request done")
         except subprocess.TimeoutExpired:
             helper_log("download timeout")

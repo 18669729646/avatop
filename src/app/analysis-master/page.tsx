@@ -34,7 +34,7 @@ import {
 } from '@/lib/analysis-master-local-helper';
 
 const ANALYSIS_MAX_VIDEO_BYTES = 100 * 1024 * 1024;
-const ANALYSIS_HELPER_DOWNLOAD_URL = '/analysis-helper/analysis-download-helper-0.1.3.zip';
+const ANALYSIS_HELPER_DOWNLOAD_URL = '/analysis-helper/analysis-download-helper-0.1.4.zip';
 
 const CHUNK_SIZE = 5 * 1024 * 1024;
 const PROJECT_PAGE_SIZE = 12;
