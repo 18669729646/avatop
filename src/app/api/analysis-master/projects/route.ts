@@ -9,6 +9,7 @@ import { logApiError, logInfo } from '@/lib/logger';
 import {
   ANALYSIS_MAX_VIDEO_BYTES,
   AnalysisMasterProjectError,
+  buildAnalysisMasterPlaceholderProjectUpsert,
   createAnalysisProjectFromLink,
   createAnalysisProjectId,
 } from '@/lib/analysis-master-projects';
@@ -77,6 +78,42 @@ async function createFromLink(userId: string, body: Record<string, unknown>) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     throw error;
+  }
+}
+
+async function createPlaceholderProject(userId: string, body: Record<string, unknown>) {
+  try {
+    const client = getSupabaseClient();
+    const row = buildAnalysisMasterPlaceholderProjectUpsert({
+      projectId: typeof body.projectId === 'string' && body.projectId.trim() ? body.projectId.trim() : undefined,
+      userId,
+      sourceUrl: String(body.sourceUrl || body.url || ''),
+      name: typeof body.name === 'string' && body.name.trim() ? body.name.trim() : undefined,
+      importMetadata: (body.importMetadata && typeof body.importMetadata === 'object' ? body.importMetadata : undefined) as Record<string, string> | undefined,
+    });
+
+    const { data, error } = await client
+      .from('analysis_master_projects')
+      .insert(row)
+      .select()
+      .single();
+
+    if (error) {
+      logApiError('analysis-master/projects', 'createPlaceholder insert', error, { projectId: row.id }, userId);
+      return NextResponse.json({ error: '创建项目失败' }, { status: 500 });
+    }
+
+    logInfo('api', '分析大师占位项目已创建', { projectId: data.id, status: data.status }, userId);
+    return NextResponse.json({
+      success: true,
+      data: {
+        ...mapProject(data),
+        projectId: data.id,
+      },
+    });
+  } catch (error) {
+    logApiError('analysis-master/projects', 'createPlaceholder', error, undefined, userId);
+    return NextResponse.json({ error: '创建项目失败' }, { status: 500 });
   }
 }
 
@@ -234,6 +271,9 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
+    if (body.importMode === 'local-helper') {
+      return createPlaceholderProject(auth.userId, body);
+    }
     return createFromLink(auth.userId, body);
   } catch (error) {
     logApiError('analysis-master/projects', 'POST', error);

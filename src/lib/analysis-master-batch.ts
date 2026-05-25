@@ -15,6 +15,17 @@ export function createAnalysisMasterBatchImportId(): string {
   return `am-batch-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+export function resolveBatchProjectName(metadata: Record<string, string>, index: number): string {
+  const base =
+    metadata['椤圭洰鍚嶇О']
+    || metadata['瑙嗛鍚嶇О']
+    || metadata['鏍囬']
+    || metadata['鍚嶇О']
+    || metadata['鍐呭']
+    || `鎵归噺瀵煎叆椤圭洰 ${index + 1}`;
+  return `[鎵归噺] ${base}`;
+}
+
 export async function updateAnalysisMasterBatchImportProgress(params: {
   batchId: string;
   createdRows?: number;

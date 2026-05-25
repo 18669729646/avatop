@@ -311,6 +311,7 @@ def upload_video(payload, file_path):
             "totalChunks": (file_size + chunk_size - 1) // chunk_size,
             "name": project_name,
             "sourceUrl": source_url,
+            "projectId": payload.get("projectId"),
         },
     )
     data = init_data.get("data") or {}

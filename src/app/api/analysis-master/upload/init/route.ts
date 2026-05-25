@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest, unauthorizedResponse } from '@/lib/auth-middleware';
 import { logInfo } from '@/lib/logger';
 import { checkStorageQuota } from '@/lib/storage-quota';
+import { buildAnalysisMasterUploadInitSession } from '@/lib/analysis-master-upload-session';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -59,13 +60,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `文件大小不能超过 100MB` }, { status: 400 });
     }
 
-    const uploadId = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
-    const projectId = `am-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
-    const timestamp = Date.now();
-    const extension = fileName.split('.').pop() || 'mp4';
-    const key = `analysis-master/${auth.userId}/${projectId}/${timestamp}.${extension}`;
+    const initSession = buildAnalysisMasterUploadInitSession({
+      userId: auth.userId,
+      fileName,
+      fileSize,
+      chunkSize,
+      totalChunks,
+      name,
+      sourceUrl,
+      projectId: typeof body.projectId === 'string' && body.projectId.trim() ? body.projectId.trim() : undefined,
+      now: typeof body.now === 'string' ? body.now : undefined,
+    });
+    const { uploadId, projectId, key, tempDir, session } = initSession;
 
-    const tempDir = path.join(os.tmpdir(), `am-upload-${uploadId}`);
     fs.mkdirSync(tempDir, { recursive: true });
 
     const storageCheck = await checkStorageQuota(auth.userId, fileSize);
@@ -74,20 +81,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: storageCheck.error }, { status: 507 });
     }
 
-    const session = {
-      userId: auth.userId,
-      projectId,
-      fileName,
-      fileSize,
-      name: name || fileName,
-      sourceUrl: typeof sourceUrl === 'string' && sourceUrl.trim() ? sourceUrl.trim() : undefined,
-      chunkSize,
-      totalChunks,
-      receivedChunks: [] as number[],
-      tempDir,
-      key,
-      createdAt: Date.now(),
-    };
     saveSession(uploadId, session);
 
     logInfo('api', 'AnalysisMaster 分片上传初始化', { uploadId, key, fileSize, totalChunks }, auth.userId);

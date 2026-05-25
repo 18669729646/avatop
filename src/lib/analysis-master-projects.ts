@@ -22,6 +22,53 @@ export function createAnalysisProjectId(): string {
   return `am-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+export interface AnalysisMasterPlaceholderProjectParams {
+  projectId?: string;
+  userId: string;
+  sourceUrl: string;
+  name?: string;
+  importMetadata?: Record<string, string>;
+  now?: string;
+}
+
+export function buildAnalysisMasterPlaceholderProjectUpsert(
+  params: AnalysisMasterPlaceholderProjectParams
+): Record<string, unknown> {
+  const now = params.now || new Date().toISOString();
+  const sourceUrl = params.sourceUrl.trim();
+  if (!sourceUrl) {
+    throw new AnalysisMasterProjectError('请提供视频链接', 400);
+  }
+
+  return {
+    id: params.projectId || createAnalysisProjectId(),
+    user_id: params.userId,
+    name: params.name?.trim() || '分析大师项目',
+    source_type: 'link',
+    source_url: sourceUrl,
+    status: 'downloading',
+    import_metadata: params.importMetadata || {},
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+export interface AnalysisMasterProjectStatusPatchParams {
+  status: string;
+  error?: string | null;
+  now?: string;
+}
+
+export function buildAnalysisMasterProjectStatusPatch(
+  params: AnalysisMasterProjectStatusPatchParams
+): Record<string, unknown> {
+  return {
+    status: params.status,
+    error: params.error ?? null,
+    updated_at: params.now || new Date().toISOString(),
+  };
+}
+
 interface AnalysisMasterProjectDeps {
   downloadVideoFromUrl?: typeof downloadVideoFromUrl;
   checkStorageQuota?: typeof checkStorageQuota;

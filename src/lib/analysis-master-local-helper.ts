@@ -9,6 +9,9 @@ export interface AnalysisLocalHelperRequest {
   authToken: string;
   chunkSize: number;
   maxBytes: number;
+  projectId?: string;
+  batchId?: string;
+  rowIndex?: number;
 }
 
 export function buildAnalysisLocalHelperRequest(params: {
@@ -17,6 +20,9 @@ export function buildAnalysisLocalHelperRequest(params: {
   saasBaseUrl: string;
   authToken: string | null;
   chunkSize: number;
+  projectId?: string;
+  batchId?: string;
+  rowIndex?: number;
 }): AnalysisLocalHelperRequest {
   const sourceUrl = params.sourceUrl.trim();
   if (!sourceUrl) {
@@ -26,7 +32,7 @@ export function buildAnalysisLocalHelperRequest(params: {
     throw new Error('请先登录');
   }
 
-  return {
+  const request: AnalysisLocalHelperRequest = {
     sourceUrl,
     projectName: (params.projectName || '链接分析项目').trim() || '链接分析项目',
     saasBaseUrl: params.saasBaseUrl.replace(/\/+$/, ''),
@@ -34,4 +40,16 @@ export function buildAnalysisLocalHelperRequest(params: {
     chunkSize: params.chunkSize,
     maxBytes: ANALYSIS_LOCAL_HELPER_MAX_BYTES,
   };
+
+  if (typeof params.projectId === 'string' && params.projectId) {
+    request.projectId = params.projectId;
+  }
+  if (typeof params.batchId === 'string' && params.batchId) {
+    request.batchId = params.batchId;
+  }
+  if (typeof params.rowIndex === 'number') {
+    request.rowIndex = params.rowIndex;
+  }
+
+  return request;
 }

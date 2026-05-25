@@ -16,7 +16,6 @@ import { authFetch, getAuthToken, useAuth } from '@/lib/auth-context';
 import { useTaskEvents } from '@/hooks/use-task-events';
 import { Download, FileSpreadsheet, Loader2, Music, Play, RefreshCw, Sparkles, Upload, Copy, Trash2 } from 'lucide-react';
 import { copyToClipboard } from '@/lib/prompt-templates';
-import { useTaskQueue } from '@/lib/swr';
 import { useAnalysisMasterProjects } from '@/lib/swr';
 import {
   createAnalysisMasterDraftProject,
@@ -28,10 +27,10 @@ import {
 import { ScriptRemakePanel } from '@/components/script-remake-panel';
 import { ScriptRemakeDetailModal } from '@/components/script-remake-detail-modal';
 import {
-  ANALYSIS_LOCAL_HELPER_CHUNK_SIZE,
   ANALYSIS_LOCAL_HELPER_URL,
-  buildAnalysisLocalHelperRequest,
 } from '@/lib/analysis-master-local-helper';
+import { runAnalysisMasterLocalImport } from '@/lib/analysis-master-local-import';
+import { runAnalysisMasterBatchLocalImport, type AnalysisMasterBatchImportSummary } from '@/lib/analysis-master-import-queue';
 
 const ANALYSIS_MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 const ANALYSIS_HELPER_DOWNLOAD_URL = '/analysis-helper/analysis-download-helper-0.1.5.zip';
@@ -137,22 +136,6 @@ interface ScriptRemakeStatus {
   status: string;
   title: string;
   created_at: string;
-}
-
-interface BatchImportSummary {
-  batchId: string;
-  taskId: string;
-  sourceFileName?: string;
-  total: number;
-  limit: number;
-  status: string;
-  createdRows?: number;
-  failedRows?: number;
-  failedItems?: Array<{
-    sourceUrl: string;
-    error: string;
-  }>;
-  error?: string;
 }
 
 function formatSize(size?: number) {
@@ -424,7 +407,6 @@ export default function AnalysisMasterPage() {
   const router = useRouter();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
-  const { tasks: queueTasks } = useTaskQueue('mine', user?.id, { excludeAnalysisMaster: false });
   const [draftProjects, setDraftProjects] = useState<AnalysisMasterDraftProject[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
   const [previewData, setPreviewData] = useState<Record<string, unknown> | null>(null);
@@ -442,7 +424,7 @@ export default function AnalysisMasterPage() {
   const [deletingId, setDeletingId] = useState('');
   const [uploadState, setUploadState] = useState<UploadState>({ phase: 'idle' });
   const [error, setError] = useState('');
-  const [batchSummary, setBatchSummary] = useState<BatchImportSummary | null>(null);
+  const [batchSummary, setBatchSummary] = useState<AnalysisMasterBatchImportSummary | null>(null);
   const [projectPage, setProjectPage] = useState(1);
   const { projects: serverProjects, pagination: projectPagination, mutate: mutateProjects, isLoading: isProjectsLoading } = useAnalysisMasterProjects(user?.id, projectPage);
   const [remakeStatuses, setRemakeStatuses] = useState<Record<string, ScriptRemakeStatus>>({});
@@ -483,22 +465,32 @@ export default function AnalysisMasterPage() {
   const selectedProject = stableProjectRef.current;
   const selectedProjectIsOptimistic = Boolean(selectedProject?.optimisticStatus);
   const displayedProjectCount = projectPagination.total + draftProjects.length;
-  const batchTask = batchSummary ? queueTasks.find(task => task.id === batchSummary.taskId) || null : null;
-  const batchTaskResult = batchTask?.result as BatchImportSummary | undefined;
-  const batchTotal = batchTaskResult?.total ?? batchSummary?.total ?? 0;
-  const batchProcessed = (batchTaskResult?.createdRows ?? 0) + (batchTaskResult?.failedRows ?? 0);
+  const batchTotal = batchSummary?.total ?? 0;
+  const batchProcessed = batchSummary?.processed ?? 0;
+  const batchFailedItems = batchSummary?.failedItems ?? [];
   const batchProgress = batchTotal > 0
     ? Math.min(100, Math.round((batchProcessed / batchTotal) * 100))
     : 0;
-  const batchStatus = batchTask?.status || batchSummary?.status || 'queued';
+  const batchStatus = batchSummary?.status || 'running';
 
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem('analysis-master-batch-summary');
       if (!saved) return;
-      const parsed = JSON.parse(saved) as BatchImportSummary;
-      if (parsed?.taskId && parsed?.batchId) {
-        setBatchSummary(parsed);
+      const parsed = JSON.parse(saved) as Partial<AnalysisMasterBatchImportSummary> & { taskId?: string };
+      if (parsed?.batchId) {
+        setBatchSummary({
+          batchId: parsed.batchId,
+          sourceFileName: parsed.sourceFileName,
+          total: parsed.total || 0,
+          processed: parsed.processed ?? ((parsed.createdRows ?? 0) + (parsed.failedRows ?? 0)),
+          createdRows: parsed.createdRows ?? 0,
+          failedRows: parsed.failedRows ?? 0,
+          failedItems: parsed.failedItems ?? [],
+          rowResults: parsed.rowResults ?? [],
+          status: parsed.status || 'success',
+          error: parsed.error,
+        });
       }
     } catch {
       window.localStorage.removeItem('analysis-master-batch-summary');
@@ -650,14 +642,6 @@ export default function AnalysisMasterPage() {
     ]);
     setSelectedId(clientRequestId);
     try {
-      const helperRequest = buildAnalysisLocalHelperRequest({
-        sourceUrl: url,
-        projectName: projectName.trim() || '链接分析项目',
-        saasBaseUrl: window.location.origin,
-        authToken: getAuthToken(),
-        chunkSize: ANALYSIS_LOCAL_HELPER_CHUNK_SIZE,
-      });
-
       const healthController = new AbortController();
       const healthTimeout = window.setTimeout(() => healthController.abort(), 2000);
       try {
@@ -675,25 +659,27 @@ export default function AnalysisMasterPage() {
         window.clearTimeout(healthTimeout);
       }
 
-      const response = await fetch(`${ANALYSIS_LOCAL_HELPER_URL}/v1/download`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(helperRequest),
-      });
-      console.log('[从链接导入] 响应状态:', response.status);
-      const data = await response.json();
-      console.log('[从链接导入] 响应数据:', data);
-      if (!response.ok || data.success === false) throw new Error(data.error || '视频解析失败，请检查当前网络环境后重试。');
+      const result = await runAnalysisMasterLocalImport(
+        {
+          sourceUrl: url,
+          projectName: projectName.trim() || '链接分析项目',
+          saasBaseUrl: window.location.origin,
+          authToken: getAuthToken(),
+        },
+        {
+          authFetch,
+        }
+      );
+
       setSourceUrl('');
       setProjectName('');
       setLocalHelperDisconnected(false);
-      const createdProject = (data.data || data) as { id?: string; projectId?: string };
       setDraftProjects(prev => prev.filter(item => item.clientRequestId !== clientRequestId));
       await mutateProjects().catch(refreshErr => {
         console.warn('[从链接导入] 列表刷新失败，但项目已创建:', refreshErr);
       });
-      setSelectedId(String(createdProject.id || createdProject.projectId || ''));
-      console.log('[从链接导入] 成功, projectId=', createdProject.id || createdProject.projectId);
+      setSelectedId(String(result.projectId));
+      console.log('[从链接导入] 成功, projectId=', result.projectId);
     } catch (err) {
       const msg = err instanceof Error ? err.message : '创建失败';
       console.error('[从链接导入] 失败:', msg);
@@ -808,11 +794,47 @@ export default function AnalysisMasterPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '批量导入失败');
-      setBatchSummary(data.data as BatchImportSummary);
+      const batchData = data.data as {
+        batchId: string;
+        sourceFileName?: string;
+        total: number;
+        limit: number;
+        imports: Array<{ sourceUrl: string; metadata: Record<string, string> }>;
+      };
+      const initialSummary: AnalysisMasterBatchImportSummary = {
+        batchId: batchData.batchId,
+        sourceFileName: batchData.sourceFileName,
+        total: batchData.total,
+        processed: 0,
+        createdRows: 0,
+        failedRows: 0,
+        failedItems: [],
+        rowResults: [],
+        status: 'running',
+      };
+      setBatchSummary(initialSummary);
+      const result = await runAnalysisMasterBatchLocalImport(
+        {
+          batchId: batchData.batchId,
+          sourceFileName: batchData.sourceFileName,
+          imports: batchData.imports,
+          saasBaseUrl: window.location.origin,
+          authToken: getAuthToken(),
+          concurrency: 3,
+          maxRetries: 1,
+        },
+        {
+          authFetch,
+          helperFetch: fetch,
+          onProgress: setBatchSummary,
+        }
+      );
+      setBatchSummary(result);
       setBatchFile(null);
       await mutateProjects();
     } catch (err) {
       setError(err instanceof Error ? err.message : '批量导入失败');
+      setBatchSummary(prev => prev ? { ...prev, status: 'failed', error: err instanceof Error ? err.message : '批量导入失败' } : prev);
     } finally {
       setBatchImporting(false);
     }
@@ -1018,7 +1040,7 @@ export default function AnalysisMasterPage() {
                   </Button>
                   {batchSummary && (
                     <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground space-y-1">
-                      <div>已加入后台队列，识别 {batchSummary.total} 条</div>
+                      <div>本机队列处理中，识别 {batchSummary.total} 条</div>
                       <div>批次 ID：{batchSummary.batchId}</div>
                       <div className="text-primary">系统会自动创建项目并进入分析队列</div>
                     </div>
@@ -1044,11 +1066,11 @@ export default function AnalysisMasterPage() {
                       <div className="rounded-lg border bg-muted/30 p-3 text-xs space-y-2">
                         <div className="flex items-center justify-between gap-3">
                           <span className="text-muted-foreground">成功</span>
-                          <span className="font-medium text-foreground">{batchTaskResult?.createdRows ?? 0}</span>
+                          <span className="font-medium text-foreground">{batchSummary?.createdRows ?? 0}</span>
                         </div>
                         <div className="flex items-center justify-between gap-3">
                           <span className="text-muted-foreground">失败</span>
-                          <span className="font-medium text-foreground">{batchTaskResult?.failedRows ?? 0}</span>
+                          <span className="font-medium text-foreground">{batchSummary?.failedRows ?? 0}</span>
                         </div>
                         <div className="flex items-center justify-between gap-3">
                           <span className="text-muted-foreground">状态</span>
@@ -1062,20 +1084,20 @@ export default function AnalysisMasterPage() {
                           <span className="text-muted-foreground">已处理</span>
                           <span className="font-medium text-foreground">{batchProcessed}</span>
                         </div>
-                        {(batchSummary.failedRows ?? 0) > 0 && (
+                        {(batchSummary?.failedRows ?? 0) > 0 && (
                           <div className="flex items-center justify-between gap-3">
                             <span className="text-muted-foreground">失败</span>
-                            <span className="font-medium text-destructive">{batchSummary.failedRows}</span>
+                            <span className="font-medium text-destructive">{batchSummary?.failedRows}</span>
                           </div>
                         )}
                         <div className="flex items-center justify-between gap-3">
                           <span className="text-muted-foreground">批次编号</span>
-                          <span className="font-medium text-foreground break-all text-right">{batchSummary.batchId}</span>
+                          <span className="font-medium text-foreground break-all text-right">{batchSummary?.batchId}</span>
                         </div>
-                        {batchSummary.failedItems && batchSummary.failedItems.length > 0 && (
+                        {batchFailedItems.length > 0 && (
                           <div className="mt-2 pt-2 border-t border-border/50 space-y-1.5">
-                            <div className="text-xs font-medium text-muted-foreground">失败详情（{batchSummary.failedRows} 条）</div>
-                            {batchSummary.failedItems.map((item, idx) => (
+                            <div className="text-xs font-medium text-muted-foreground">失败详情（{batchSummary?.failedRows ?? 0} 条）</div>
+                            {batchFailedItems.map((item, idx) => (
                               <div key={idx} className="text-xs bg-destructive/5 border border-destructive/20 rounded px-2 py-1.5">
                                 <div className="text-destructive font-medium truncate">{item.sourceUrl}</div>
                                 <div className="text-muted-foreground mt-0.5">{item.error}</div>
@@ -1083,10 +1105,10 @@ export default function AnalysisMasterPage() {
                             ))}
                           </div>
                         )}
-                        {batchSummary && batchTask?.status === 'failed' && !batchSummary.error && (
+                        {batchSummary && batchSummary.error && (
                           <div className="mt-3 p-3 bg-destructive/5 border border-destructive/20 rounded-lg">
                             <div className="text-sm font-medium text-destructive">批量导入失败</div>
-                            <div className="text-xs text-muted-foreground mt-1">{batchTask.error || '任务执行异常，请重试'}</div>
+                            <div className="text-xs text-muted-foreground mt-1">{batchSummary.error || '任务执行异常，请重试'}</div>
                           </div>
                         )}
                       </div>

@@ -16,6 +16,9 @@ describe('analysis master local helper request', () => {
       saasBaseUrl: 'https://app.example.com/',
       authToken: 'jwt-token',
       chunkSize: ANALYSIS_LOCAL_HELPER_CHUNK_SIZE,
+      projectId: 'am-1',
+      batchId: 'batch-1',
+      rowIndex: 2,
     });
 
     assert.equal(ANALYSIS_LOCAL_HELPER_URL, 'http://127.0.0.1:17321');
@@ -28,13 +31,20 @@ describe('analysis master local helper request', () => {
       authToken: 'jwt-token',
       chunkSize: 512 * 1024,
       maxBytes: 100 * 1024 * 1024,
+      projectId: 'am-1',
+      batchId: 'batch-1',
+      rowIndex: 2,
     });
   });
 
   it('uses smaller chunks for the local helper without changing manual upload chunks', () => {
     const pageSource = readFileSync('src/app/analysis-master/page.tsx', 'utf8');
+    const helperImportSource = readFileSync('src/lib/analysis-master-local-import.ts', 'utf8');
+    const helperSource = readFileSync('src/lib/analysis-master-local-helper.ts', 'utf8');
 
-    assert.match(pageSource, /chunkSize:\s*ANALYSIS_LOCAL_HELPER_CHUNK_SIZE/);
+    assert.match(pageSource, /runAnalysisMasterLocalImport/);
+    assert.match(helperImportSource, /ANALYSIS_LOCAL_HELPER_CHUNK_SIZE/);
+    assert.match(helperSource, /ANALYSIS_LOCAL_HELPER_CHUNK_SIZE/);
     assert.match(pageSource, /const CHUNK_SIZE = 5 \* 1024 \* 1024/);
   });
 
