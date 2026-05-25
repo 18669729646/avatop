@@ -1,5 +1,5 @@
 param(
-  [string]$Version = "0.1.4",
+  [string]$Version = "0.1.5",
   [string]$YtDlpPath = ""
 )
 
@@ -36,13 +36,14 @@ New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 
 Push-Location $Root
 try {
-  python -m PyInstaller --noconfirm --onedir --name analysis-download-helper helper.py
+  python -m PyInstaller --noconfirm --noconsole --onedir --name analysis-download-helper helper.py
 } finally {
   Pop-Location
 }
 
 Copy-Item -Recurse -Force -Path (Join-Path $Root "dist\analysis-download-helper\*") -Destination $BundleDir
 Copy-Item -LiteralPath $YtDlp -Destination (Join-Path $BinDir "yt-dlp.exe")
+Copy-Item -LiteralPath (Join-Path $ProjectRoot "src\app\favicon.ico") -Destination (Join-Path $BundleDir "favicon.ico")
 Copy-Item -LiteralPath (Join-Path $Root "README.md") -Destination (Join-Path $BundleDir "README.md")
 
 $StartScript = @'

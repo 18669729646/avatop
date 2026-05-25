@@ -21,10 +21,13 @@ test('analysis download helper is packaged as a lightweight yt-dlp-only build', 
   assert.match(helper, /helper_log\("complete upload done"/);
   assert.match(helper, /response dropped:/);
   assert.match(helper, /success response dropped:/);
+  assert.match(helper, /Shell_NotifyIconW/);
+  assert.match(helper, /tray/i);
 
+  assert.match(buildScript, /--noconsole/);
+  assert.match(buildScript, /favicon\.ico/);
   assert.doesNotMatch(buildScript, /FfmpegPath/);
   assert.doesNotMatch(buildScript, /ffmpeg\.exe/);
 
-  assert.match(page, /analysis-download-helper-0\.1\.4\.zip/);
-  assert.match(page, /下载轻量解析组件/);
+  assert.match(page, /analysis-download-helper-0\.1\.5\.zip/);
 });

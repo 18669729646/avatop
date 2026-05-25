@@ -12,6 +12,8 @@ For development, install `yt-dlp`, then run:
 python helper.py
 ```
 
+When packaged for Windows, the helper starts in the system tray with no separate console window. The tray menu includes status, open log, and exit.
+
 Health check:
 
 ```text
@@ -49,7 +51,7 @@ powershell -ExecutionPolicy Bypass -File tools\analysis-download-helper\build-wi
 The build script creates:
 
 ```text
-tools/analysis-download-helper/dist/analysis-download-helper-0.1.4.zip
+tools/analysis-download-helper/dist/analysis-download-helper-0.1.5.zip
 ```
 
 The zip contains:
@@ -57,6 +59,7 @@ The zip contains:
 - `analysis-download-helper.exe`
 - `start-helper.bat`
 - `bin/yt-dlp.exe`
+- `favicon.ico`
 - `README.md`
 
 This lightweight package does not include `ffmpeg`. It asks `yt-dlp` to download a single file that already contains both audio and video. A small number of links may fail if the source platform only exposes separate audio and video streams.
