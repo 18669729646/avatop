@@ -4,7 +4,7 @@ import {
   mergeServerDownloadApisForTest,
   selectTikHubApiConfigForTest,
 } from '../src/lib/server-config';
-import { mergeDefaultApiIdsForTest } from '../src/app/api/system-config/route';
+import { mergeDefaultApiIds } from '../src/lib/default-api-ids';
 
 describe('video download API config', () => {
   it('prefers the default TikHub config stored in system_config downloadApis', () => {
@@ -76,7 +76,7 @@ describe('video download API config', () => {
   });
 
   it('does not clear existing default model IDs when only the default downloader changes', () => {
-    const defaults = mergeDefaultApiIdsForTest(
+    const defaults = mergeDefaultApiIds(
       {
         defaultTextApiId: 'text-db',
         defaultImageApiId: 'image-db',

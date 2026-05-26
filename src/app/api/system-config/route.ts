@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { authenticateRequest, unauthorizedResponse } from '@/lib/auth-middleware';
 
+// This route does not use dynamic parameters
+export const dynamicParams = false;
+
 // 脱敏 API Key（显示前4位和后4位）
 function maskApiKey(apiKey: string | undefined): string {
   if (!apiKey) return '';
@@ -239,23 +242,8 @@ export async function GET() {
   }
 }
 
-// 脱敏配置对象
-type DefaultApiIds = {
-  defaultTextApiId?: string;
-  defaultImageApiId?: string;
-  defaultVideoApiId?: string;
-  defaultDownloadApiId?: string;
-};
-
-function mergeDefaultApiIds(existingDefaults: DefaultApiIds | undefined, updates: DefaultApiIds): Required<DefaultApiIds> {
-  const fallback = getEmptyConfigs();
-  return {
-    defaultTextApiId: updates.defaultTextApiId ?? existingDefaults?.defaultTextApiId ?? fallback.defaultTextApiId,
-    defaultImageApiId: updates.defaultImageApiId ?? existingDefaults?.defaultImageApiId ?? fallback.defaultImageApiId,
-    defaultVideoApiId: updates.defaultVideoApiId ?? existingDefaults?.defaultVideoApiId ?? fallback.defaultVideoApiId,
-    defaultDownloadApiId: updates.defaultDownloadApiId ?? existingDefaults?.defaultDownloadApiId ?? fallback.defaultDownloadApiId,
-  };
-}
+// Default API IDs utilities
+import { mergeDefaultApiIds, type DefaultApiIds } from '@/lib/default-api-ids';
 
 function maskConfigs(configs: ReturnType<typeof getEmptyConfigs>) {
   return {
@@ -446,4 +434,4 @@ export async function DELETE(request: NextRequest) {
   }
 }
 
-export const mergeDefaultApiIdsForTest = mergeDefaultApiIds;
+
