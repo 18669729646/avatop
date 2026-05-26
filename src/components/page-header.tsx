@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Video, Sparkles, FolderOpen, ListOrdered, Settings2, Film } from 'lucide-react';
-import { getQueueStats } from '@/lib/queue';
 import { SystemSettingsDialog } from '@/components/system-settings-dialog';
+import { useQueueStatsContext } from '@/lib/queue-stats-context';
 
 interface PageHeaderProps {
   currentPage: 'image' | 'video' | 'library' | 'shortfilm' | 'queue';
@@ -14,25 +14,8 @@ interface PageHeaderProps {
 }
 
 export function PageHeader({ currentPage, title, description }: PageHeaderProps) {
-  const [queueStats, setQueueStats] = useState({ total: 0, pending: 0, running: 0, success: 0, failed: 0 });
+  const { queueStats } = useQueueStatsContext();
   const [showSettings, setShowSettings] = useState(false);
-
-  useEffect(() => {
-    // 加载队列统计
-    getQueueStats().then(result => setQueueStats(result.stats)).catch(() => {});
-    
-    // 定时刷新（降低频率到5秒）
-    const interval = setInterval(async () => {
-      try {
-        const result = await getQueueStats();
-        setQueueStats(result.stats);
-      } catch {
-        // 忽略错误，下次轮询会重试
-      }
-    }, 5000);
-    
-    return () => clearInterval(interval);
-  }, []);
 
   return (
     <div className="space-y-4">

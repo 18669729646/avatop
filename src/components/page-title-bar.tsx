@@ -1,11 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
-import { getQueueStats } from '@/lib/queue';
 import Link from 'next/link';
+import { useQueueStatsContext } from '@/lib/queue-stats-context';
 
 interface PageTitleBarProps {
   title: string;
@@ -22,22 +21,7 @@ export function PageTitleBar({
   actions,
   showQueueStatus = false 
 }: PageTitleBarProps) {
-  const [queueStats, setQueueStats] = useState({ total: 0, pending: 0, running: 0, success: 0, failed: 0 });
-
-  useEffect(() => {
-    if (showQueueStatus) {
-      getQueueStats().then(result => setQueueStats(result.stats)).catch(() => {});
-      const interval = setInterval(async () => {
-        try {
-          const result = await getQueueStats();
-          setQueueStats(result.stats);
-        } catch {
-          // 忽略错误，下次轮询会重试
-        }
-      }, 5000);
-      return () => clearInterval(interval);
-    }
-  }, [showQueueStatus]);
+  const { queueStats } = useQueueStatsContext();
 
   return (
     <header className="shrink-0 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">

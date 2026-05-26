@@ -41,13 +41,14 @@ import {
   Product,
   getProducts,
 } from '@/lib/products';
-import { addTaskToQueue, getQueueStats } from '@/lib/queue';
+import { addTaskToQueue } from '@/lib/queue';
 import { getDefaultVideoApi, VideoApiConfig, FRAMES_MODELS, COMPONENTS_MODELS } from '@/lib/system-config';
 import { ModelSelector } from '@/components/model-selector';
 import { AppLayout } from '@/components/app-layout';
 import { cn } from '@/lib/utils';
 import { compressImage } from '@/lib/image-utils';
 import { useTaskEvents } from '@/hooks/use-task-events';
+import { useQueueStatsContext } from '@/lib/queue-stats-context';
 
 const ASPECT_RATIOS = [
   { value: '16:9', label: '横版 (16:9)' },
@@ -128,7 +129,6 @@ export default function VideoGenerator() {
   const [selectedCharacters, setSelectedCharacters] = useState<Set<string>>(new Set());
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
   
-  const [queueStats, setQueueStats] = useState({ total: 0, pending: 0, running: 0, success: 0, failed: 0 });
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   
@@ -179,6 +179,7 @@ export default function VideoGenerator() {
     requestSize?: string;
   } | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+  const { queueStats, refreshQueueStats } = useQueueStatsContext();
   
   // 折叠状态
   const [expandedSections, setExpandedSections] = useState({
@@ -268,21 +269,17 @@ export default function VideoGenerator() {
     };
     
     loadData();
-    
-    // 异步获取队列统计
-    getQueueStats().then(result => setQueueStats(result.stats)).catch(() => {});
   }, []);
 
   // SSE 实时更新任务状态
   useTaskEvents(
     async () => {
       // 任务状态变化时，刷新队列统计和历史记录
-      const [statsResult, images, videos] = await Promise.all([
-        getQueueStats(),
+      const [, images, videos] = await Promise.all([
+        refreshQueueStats(),
         getImageHistory(),
         getVideoHistory(),
       ]);
-      setQueueStats(statsResult.stats);
       setImageHistory(images);
       setVideoHistory(videos);
     },
@@ -296,12 +293,11 @@ export default function VideoGenerator() {
     if (!hasActiveTasks) return;
 
     const pollInterval = setInterval(async () => {
-      const [statsResult, images, videos] = await Promise.all([
-        getQueueStats(),
+      const [, images, videos] = await Promise.all([
+        refreshQueueStats(),
         getImageHistory(),
         getVideoHistory(),
       ]);
-      setQueueStats(statsResult.stats);
       setImageHistory(images);
       setVideoHistory(videos);
     }, 30000);
@@ -675,8 +671,7 @@ export default function VideoGenerator() {
       return;
     }
     
-    const statsResult = await getQueueStats();
-    setQueueStats(statsResult.stats);
+    await refreshQueueStats();
     setPrompt('');
     setImages([]);
     setSelectedHistoryImages(new Set());

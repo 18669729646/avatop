@@ -53,7 +53,6 @@ import {
 } from '@/lib/products';
 import {
   addTaskToQueue,
-  getQueueStats,
   ImageTaskParams,
 } from '@/lib/queue';
 import { getDefaultImageApi, ImageApiConfig } from '@/lib/system-config';
@@ -63,6 +62,7 @@ import { cn } from '@/lib/utils';
 import { compressImage } from '@/lib/image-utils';
 import { useTaskEvents } from '@/hooks/use-task-events';
 import { OnboardingGuide } from '@/components/onboarding-guide';
+import { useQueueStatsContext } from '@/lib/queue-stats-context';
 
 const ASPECT_RATIOS = [
   { value: '1:1', label: '正方形 (1:1)' },
@@ -110,7 +110,6 @@ export default function ImageGenerator() {
   const [selectedCharacters, setSelectedCharacters] = useState<Set<string>>(new Set());
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
   
-  const [queueStats, setQueueStats] = useState({ total: 0, pending: 0, running: 0, success: 0, failed: 0 });
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   
@@ -147,6 +146,7 @@ export default function ImageGenerator() {
     generationConfig?: Record<string, unknown>;
   } | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+  const { queueStats, refreshQueueStats } = useQueueStatsContext();
   
   // 折叠状态
   const [expandedSections, setExpandedSections] = useState({
@@ -178,8 +178,6 @@ export default function ImageGenerator() {
     };
     
     loadData();
-    
-    getQueueStats().then(result => setQueueStats(result.stats)).catch(() => {});
   }, [user]);
 
   // 检查是否显示新手引导
@@ -229,11 +227,10 @@ export default function ImageGenerator() {
   useTaskEvents(
     async () => {
       // 任务状态变化时，刷新队列统计和历史图片
-      const [statsResult, images] = await Promise.all([
-        getQueueStats(),
+      const [, images] = await Promise.all([
+        refreshQueueStats(),
         getImageHistory(),
       ]);
-      setQueueStats(statsResult.stats);
       setImageHistory(images);
     },
     { enabled: true }
@@ -518,8 +515,7 @@ export default function ImageGenerator() {
       return;
     }
     
-    const statsResult = await getQueueStats();
-    setQueueStats(statsResult.stats);
+    await refreshQueueStats();
     
     // 重置状态
     setPrompt('');

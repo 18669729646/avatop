@@ -32,6 +32,7 @@ import { useAuth } from '@/lib/auth-context';
 import { UserMenu } from '@/components/user-menu';
 import { Loader2 } from 'lucide-react';
 import { AuthDialog } from '@/components/auth-dialog';
+import { QueueStatsProvider } from '@/lib/queue-stats-context';
 
 // 环境变量
 const COZE_PROJECT_ENV = process.env.COZE_PROJECT_ENV || 'DEV';
@@ -141,7 +142,7 @@ function AppLayoutInner({ children }: AppLayoutProps) {
   const router = useRouter();
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
-  const [queueStats, setQueueStats] = useState({ total: 0, pending: 0, running: 0, success: 0, failed: 0 });
+  const [queueStats, setQueueStats] = useState({ total: 0, pending: 0, running: 0, retrying: 0, success: 0, failed: 0 });
   const [mounted, setMounted] = useState(false);
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [authTab, setAuthTab] = useState<'login' | 'register' | 'change-password'>('login');
@@ -159,7 +160,7 @@ function AppLayoutInner({ children }: AppLayoutProps) {
     const timer = setTimeout(() => {
       setMounted(true);
     }, 0);
-    
+
     // 加载侧边栏折叠状态（纯客户端 UI 状态，使用 localStorage）
     try {
       const saved = localStorage.getItem('sidebar_collapsed');
@@ -169,20 +170,34 @@ function AppLayoutInner({ children }: AppLayoutProps) {
     } catch {
       // ignore
     }
-    
-    getQueueStats().then(result => setQueueStats(result.stats)).catch(() => {});
-    
-    const interval = setInterval(async () => {
-      try {
-        const result = await getQueueStats();
-        setQueueStats(result.stats);
-      } catch {
-        // 忽略错误，下次轮询会重试
-      }
-    }, 5000);
-    
-    return () => clearInterval(interval);
+
+    return () => clearTimeout(timer);
   }, []);
+
+  const refreshQueueStats = useCallback(async () => {
+    try {
+      const result = await getQueueStats();
+      setQueueStats(result.stats);
+    } catch {
+      // 忽略错误，下次轮询会重试
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isPublicPath || authLoading || !isAuthenticated) {
+      return;
+    }
+
+    void refreshQueueStats();
+
+    const interval = setInterval(() => {
+      void refreshQueueStats();
+    }, 5000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [authLoading, isAuthenticated, isPublicPath, refreshQueueStats]);
 
   // 认证检查
   useEffect(() => {
@@ -268,8 +283,9 @@ function AppLayoutInner({ children }: AppLayoutProps) {
   }
 
   return (
-    <TooltipProvider delayDuration={0}>
-      <div className="flex h-screen bg-background overflow-hidden">
+    <QueueStatsProvider value={{ queueStats, refreshQueueStats }}>
+      <TooltipProvider delayDuration={0}>
+        <div className="flex h-screen bg-background overflow-hidden">
         {/* 侧边栏 */}
         <aside
           className={cn(
@@ -448,16 +464,17 @@ function AppLayoutInner({ children }: AppLayoutProps) {
         <main className="flex-1 flex flex-col overflow-hidden bg-background">
           {children}
         </main>
-      </div>
+        </div>
 
-      {/* 认证弹窗 - 在所有页面都渲染，包括 SaaS 首页 */}
-      <AuthDialog
-        open={authDialogOpen}
-        onOpenChange={setAuthDialogOpen}
-        defaultTab={authTab}
-        showChangePassword={isAuthenticated}
-      />
-    </TooltipProvider>
+        {/* 认证弹窗 - 在所有页面都渲染，包括 SaaS 首页 */}
+        <AuthDialog
+          open={authDialogOpen}
+          onOpenChange={setAuthDialogOpen}
+          defaultTab={authTab}
+          showChangePassword={isAuthenticated}
+        />
+      </TooltipProvider>
+    </QueueStatsProvider>
   );
 }
 
