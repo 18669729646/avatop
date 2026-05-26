@@ -1,6 +1,7 @@
 import { getServerDefaultTextApi } from '@/lib/server-config';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { PROMPT_TYPE_CONFIGS, replaceVariables } from '@/lib/prompt-variables';
+import { longRunningAgent } from '@/lib/fetch-agent';
 
 export const ANALYSIS_MASTER_ACTION_TYPE = 'video_analysis_master';
 
@@ -236,6 +237,8 @@ async function callGeminiWithParts(
       },
     }),
     signal: AbortSignal.timeout(10 * 60 * 1000),
+    // @ts-expect-error - Node.js undici Agent
+    dispatcher: longRunningAgent,
   });
 
   if (!response.ok) {
