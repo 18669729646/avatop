@@ -8,12 +8,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { authFetch, getAuthToken, useAuth } from '@/lib/auth-context';
 import { useTaskEvents } from '@/hooks/use-task-events';
-import { Download, FileSpreadsheet, Loader2, Music, Play, RefreshCw, Sparkles, Upload, Copy, Trash2 } from 'lucide-react';
+import { AlertTriangle, Download, FileSpreadsheet, Loader2, Music, Play, RefreshCw, Sparkles, Upload, Copy, Trash2 } from 'lucide-react';
 import { copyToClipboard } from '@/lib/prompt-templates';
 import { useAnalysisMasterProjects } from '@/lib/swr';
 import {
@@ -277,7 +277,8 @@ const ProjectPanel = React.memo<ProjectPanelProps>(({
   exportProjects,
 }) => {
   if (!selectedProject) {
-    return (
+
+  return (
       <div className="flex-1 space-y-4 min-w-0">
         <Card className="border-dashed shadow-sm">
           <CardContent className="py-20 text-center text-muted-foreground">创建项目后开始分析</CardContent>
@@ -451,6 +452,8 @@ export default function AnalysisMasterPage() {
   const [exporting, setExporting] = useState(false);
   const [analyzingId, setAnalyzingId] = useState('');
   const [deletingId, setDeletingId] = useState('');
+  const [deletingAll, setDeletingAll] = useState(false);
+  const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const [uploadState, setUploadState] = useState<UploadState>({ phase: 'idle' });
   const [error, setError] = useState('');
   const [batchSummary, setBatchSummary] = useState<AnalysisMasterBatchImportSummary | null>(null);
@@ -1024,6 +1027,26 @@ export default function AnalysisMasterPage() {
     }
   };
 
+  const handleDeleteAllProjects = async () => {
+    setDeletingAll(true);
+    try {
+      const response = await authFetch('/api/analysis-master/projects', { method: 'DELETE' });
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || '批量删除失败');
+      }
+      const result = await response.json();
+      setSelectedId('');
+      await mutateProjects();
+      alert(`已成功删除 ${result.data?.deletedCount || 0} 个项目`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '批量删除失败');
+    } finally {
+      setDeletingAll(false);
+      setShowDeleteAllDialog(false);
+    }
+  };
+
   return (
     <AppLayout>
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -1195,10 +1218,16 @@ export default function AnalysisMasterPage() {
               <Card className="shadow-sm">
                 <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle className="text-base">历史项目</CardTitle>
-                  <Button variant="outline" size="sm" onClick={() => exportProjects()} disabled={exporting}>
-                    {exporting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />}
-                    批量导出
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setShowDeleteAllDialog(true)} disabled={deletingAll || projects.length === 0}>
+                      {deletingAll ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Trash2 className="w-4 h-4 mr-1" />}
+                      一键删除
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => exportProjects()} disabled={exporting}>
+                      {exporting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />}
+                      批量导出
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-2">
                   {isProjectsLoading && projects.length === 0 ? (
@@ -1406,6 +1435,41 @@ export default function AnalysisMasterPage() {
             setSelectedRemake(null);
           }}
         />
+
+        {/* 一键删除确认对话框 */}
+        <Dialog open={showDeleteAllDialog} onOpenChange={setShowDeleteAllDialog}>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>确认删除所有项目</DialogTitle>
+              <DialogDescription>
+                此操作将删除所有历史项目及其关联的任务、存储文件，且不可恢复。确定要继续吗？
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setShowDeleteAllDialog(false)}
+                disabled={deletingAll}
+              >
+                取消
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleDeleteAllProjects}
+                disabled={deletingAll}
+              >
+                {deletingAll ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    删除中...
+                  </>
+                ) : (
+                  '确认删除'
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </AppLayout>
   );
