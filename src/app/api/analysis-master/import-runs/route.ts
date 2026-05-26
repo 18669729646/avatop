@@ -80,6 +80,7 @@ export async function POST(request: NextRequest) {
 
     const { error: runError } = await client.from('analysis_master_import_runs').insert(built.run);
     if (runError) {
+      console.error('[import-runs] insert run error:', JSON.stringify(runError, null, 2));
       logApiError('analysis-master/import-runs', 'insert run', runError, { runId: built.run.id }, auth.userId);
       return NextResponse.json({ error: 'Failed to create the import run', detail: JSON.stringify(runError) }, { status: 500 });
     }
