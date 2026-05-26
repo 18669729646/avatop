@@ -103,6 +103,7 @@ function getSupabaseClient(token?: string): SupabaseClient {
 
   return createClient(url, anonKey, {
     db: {
+      schema: 'public',
       timeout: 60000,
     },
     auth: {

@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
     const { error: runError } = await client.from('analysis_master_import_runs').insert(built.run);
     if (runError) {
       logApiError('analysis-master/import-runs', 'insert run', runError, { runId: built.run.id }, auth.userId);
-      return NextResponse.json({ error: 'Failed to create the import run' }, { status: 500 });
+      return NextResponse.json({ error: 'Failed to create the import run', detail: JSON.stringify(runError) }, { status: 500 });
     }
 
     const { error: projectError } = await client.from('analysis_master_projects').insert(built.projects);
@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
           auth.userId,
         );
       }
-      return NextResponse.json({ error: 'Failed to create import projects' }, { status: 500 });
+      return NextResponse.json({ error: 'Failed to create import projects', detail: JSON.stringify(projectError) }, { status: 500 });
     }
 
     const { error: itemError } = await client.from('analysis_master_import_items').insert(built.items);
@@ -119,7 +119,7 @@ export async function POST(request: NextRequest) {
           auth.userId,
         );
       }
-      return NextResponse.json({ error: 'Failed to create import items' }, { status: 500 });
+      return NextResponse.json({ error: 'Failed to create import items', detail: JSON.stringify(itemError) }, { status: 500 });
     }
 
     logInfo('api', 'Analysis Master import orchestration created', {
@@ -147,6 +147,8 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     logApiError('analysis-master/import-runs', 'POST', error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to create the import run' }, { status: 500 });
+    // 返回详细错误信息便于调试
+    const detail = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ error: 'Failed to create the import run', detail }, { status: 500 });
   }
 }
