@@ -9,7 +9,7 @@ export interface QueueStatsContextValue {
   refreshQueueStats: () => Promise<void>;
 }
 
-const defaultQueueStats: QueueStats = {
+export const DEFAULT_QUEUE_STATS: QueueStats = {
   total: 0,
   pending: 0,
   running: 0,
@@ -31,8 +31,19 @@ export function QueueStatsProvider({
 }
 
 export function useQueueStatsContext(): QueueStatsContextValue {
-  return useContext(QueueStatsContext) ?? {
-    queueStats: defaultQueueStats,
+  const context = useContext(QueueStatsContext);
+  if (context) {
+    return context;
+  }
+
+  const error = new Error('useQueueStatsContext must be used within QueueStatsProvider');
+  if (process.env.NODE_ENV !== 'production') {
+    throw error;
+  }
+
+  console.warn(error.message);
+  return {
+    queueStats: DEFAULT_QUEUE_STATS,
     refreshQueueStats: async () => {},
   };
 }

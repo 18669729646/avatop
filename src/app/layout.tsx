@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { Providers } from '@/components/providers';
+import { QueueStatsRootProvider } from '@/components/queue-stats-provider';
 
 export const metadata: Metadata = {
   title: {
@@ -55,7 +56,7 @@ export default function RootLayout({
       </head>
       <body className="antialiased" suppressHydrationWarning>
         <Providers>
-          {children}
+          <QueueStatsRootProvider>{children}</QueueStatsRootProvider>
         </Providers>
       </body>
     </html>

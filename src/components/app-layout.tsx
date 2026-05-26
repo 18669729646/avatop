@@ -27,12 +27,11 @@ import {
   Clapperboard,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getQueueStats } from '@/lib/queue';
 import { useAuth } from '@/lib/auth-context';
 import { UserMenu } from '@/components/user-menu';
 import { Loader2 } from 'lucide-react';
 import { AuthDialog } from '@/components/auth-dialog';
-import { QueueStatsProvider } from '@/lib/queue-stats-context';
+import { useQueueStatsContext } from '@/lib/queue-stats-context';
 
 // 环境变量
 const COZE_PROJECT_ENV = process.env.COZE_PROJECT_ENV || 'DEV';
@@ -142,7 +141,6 @@ function AppLayoutInner({ children }: AppLayoutProps) {
   const router = useRouter();
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
-  const [queueStats, setQueueStats] = useState({ total: 0, pending: 0, running: 0, retrying: 0, success: 0, failed: 0 });
   const [mounted, setMounted] = useState(false);
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [authTab, setAuthTab] = useState<'login' | 'register' | 'change-password'>('login');
@@ -174,30 +172,6 @@ function AppLayoutInner({ children }: AppLayoutProps) {
     return () => clearTimeout(timer);
   }, []);
 
-  const refreshQueueStats = useCallback(async () => {
-    try {
-      const result = await getQueueStats();
-      setQueueStats(result.stats);
-    } catch {
-      // 忽略错误，下次轮询会重试
-    }
-  }, []);
-
-  useEffect(() => {
-    if (isPublicPath || authLoading || !isAuthenticated) {
-      return;
-    }
-
-    void refreshQueueStats();
-
-    const interval = setInterval(() => {
-      void refreshQueueStats();
-    }, 5000);
-
-    return () => {
-      clearInterval(interval);
-    };
-  }, [authLoading, isAuthenticated, isPublicPath, refreshQueueStats]);
 
   // 认证检查
   useEffect(() => {
@@ -258,6 +232,7 @@ function AppLayoutInner({ children }: AppLayoutProps) {
   }, [pathname]);
 
   // 计算队列徽章数字
+  const { queueStats } = useQueueStatsContext();
   const queueBadge = queueStats.pending + queueStats.running + queueStats.failed;
 
   // 公开页面直接渲染内容（无侧边栏）
@@ -283,9 +258,8 @@ function AppLayoutInner({ children }: AppLayoutProps) {
   }
 
   return (
-    <QueueStatsProvider value={{ queueStats, refreshQueueStats }}>
-      <TooltipProvider delayDuration={0}>
-        <div className="flex h-screen bg-background overflow-hidden">
+    <TooltipProvider delayDuration={0}>
+      <div className="flex h-screen bg-background overflow-hidden">
         {/* 侧边栏 */}
         <aside
           className={cn(
@@ -474,7 +448,6 @@ function AppLayoutInner({ children }: AppLayoutProps) {
           showChangePassword={isAuthenticated}
         />
       </TooltipProvider>
-    </QueueStatsProvider>
   );
 }
 
