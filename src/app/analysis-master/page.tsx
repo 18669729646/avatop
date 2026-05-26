@@ -1038,7 +1038,7 @@ export default function AnalysisMasterPage() {
       const result = await response.json();
       setSelectedId('');
       await mutateProjects();
-      alert(`已成功删除 ${result.data?.deletedCount || 0} 个项目`);
+      alert(`已成功删除 ${result.data?.deleted || 0} 个项目`);
     } catch (err) {
       alert(err instanceof Error ? err.message : '批量删除失败');
     } finally {

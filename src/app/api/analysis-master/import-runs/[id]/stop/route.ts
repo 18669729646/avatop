@@ -42,14 +42,31 @@ export async function POST(
       );
     }
 
+    // Idempotent: if already completed/stopped, return success
+    if (run.status === 'completed' || run.status === 'stopped') {
+      return NextResponse.json({ success: true, data: { status: run.status } });
+    }
+
     // Refresh progress to get latest counts
     await refreshAnalysisMasterImportRunProgress(runId, client);
+
+    // Read updated counts to determine final status
+    const { data: updatedRun } = await client
+      .from('analysis_master_import_runs')
+      .select('total_items, completed_items, failed_items')
+      .eq('id', runId)
+      .single();
+
+    const finalStatus =
+      updatedRun && updatedRun.failed_items > 0
+        ? 'completed_with_errors'
+        : 'completed';
 
     // Mark the run as completed
     const { error: updateError } = await client
       .from('analysis_master_import_runs')
       .update({
-        status: 'completed',
+        status: finalStatus,
         completed_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
@@ -63,7 +80,10 @@ export async function POST(
       );
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      data: { status: finalStatus },
+    });
   } catch (error) {
     logApiError('import-run-stop', 'stop', error);
     return NextResponse.json(

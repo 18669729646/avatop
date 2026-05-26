@@ -85,11 +85,18 @@ export async function POST(
       projectUpdate.video_duration = videoDuration;
     }
 
-    await client
+    const { error: projectUpdateError } = await client
       .from('analysis_master_projects')
       .update(projectUpdate)
       .eq('id', item.project_id)
       .eq('user_id', item.user_id);
+
+    if (projectUpdateError) {
+      logApiError('import-item-done', 'update project status', projectUpdateError, {
+        runId, itemId, projectId: item.project_id,
+      });
+      // Don't fail the whole request — item is done, just log the project update issue
+    }
 
     // 4. Refresh run progress
     await refreshAnalysisMasterImportRunProgress(runId, client).catch((err) => {
