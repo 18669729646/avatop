@@ -1,3 +1,5 @@
+import yt_dlp
+
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ctypes
 import os
@@ -7,7 +9,7 @@ from urllib import request as urlrequest
 from urllib.parse import urlparse
 import json
 import shutil
-import subprocess
+
 import tempfile
 import threading
 import time
@@ -16,7 +18,7 @@ from ctypes import wintypes
 
 HOST = "127.0.0.1"
 PORT = 17321
-VERSION = "0.1.5"
+VERSION = "0.1.6"
 YTDLP_SINGLE_FILE_FORMAT = "best[ext=mp4][acodec!=none][vcodec!=none]/best[acodec!=none][vcodec!=none]/best"
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 180
 COMPLETE_UPLOAD_TIMEOUT_SECONDS = 600
@@ -182,24 +184,6 @@ def runtime_dir():
     return app_dir()
 
 
-def resolve_tool(name):
-    candidates = [
-        app_dir() / "bin" / f"{name}.exe",
-        app_dir() / f"{name}.exe",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return str(candidate)
-
-    found = shutil.which(name)
-    if found:
-        return found
-    found_exe = shutil.which(f"{name}.exe")
-    if found_exe:
-        return found_exe
-    return None
-
-
 def json_bytes(data):
     return json.dumps(data, ensure_ascii=False).encode("utf-8")
 
@@ -273,31 +257,26 @@ def find_downloaded_file(directory):
 
 
 def download_video(source_url, output_dir):
-    yt_dlp = resolve_tool("yt-dlp")
-    if not yt_dlp:
-        raise RuntimeError("解析组件缺少下载引擎，请重新安装解析组件。")
-
     output_template = str(Path(output_dir) / "source.%(ext)s")
     helper_log("download start")
-    command = [
-        yt_dlp,
-        "--no-playlist",
-        "--no-warnings",
-        "-f",
-        YTDLP_SINGLE_FILE_FORMAT,
-        "--output",
-        output_template,
-        source_url,
-    ]
 
-    subprocess.run(
-        command,
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-        timeout=300,
-    )
+    ydl_opts = {
+        "format": YTDLP_SINGLE_FILE_FORMAT,
+        "outtmpl": output_template,
+        "no_playlist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([source_url])
+    except yt_dlp.utils.DownloadError as exc:
+        raise RuntimeError(str(exc) or "视频解析失败") from exc
+    except Exception as exc:
+        raise RuntimeError(str(exc) or "视频解析失败，请检查当前网络环境后重试。") from exc
+
     file_path = find_downloaded_file(output_dir)
     helper_log(f"download done: {file_path.name} {file_path.stat().st_size} bytes")
     return file_path
@@ -418,15 +397,10 @@ def run_import_runner(payload):
                         file_path = download_video(item_payload["sourceUrl"], tmp)
                         upload_video(item_payload, file_path)
                     helper_log(f"import item done: {item_id}")
-                except subprocess.TimeoutExpired:
-                    helper_log(f"import item timeout: {item_id}")
-                    fail_import_item(saas_base, runner_token, run_id, item_id, "视频解析超时，请检查当前网络环境后重试。")
-                except subprocess.CalledProcessError as exc:
-                    helper_log(f"import item download failed: {item_id} {exc.stderr or exc}")
-                    fail_import_item(saas_base, runner_token, run_id, item_id, "视频解析失败，请检查当前网络环境后重试。")
                 except Exception as exc:
-                    helper_log(f"import item failed: {item_id} {exc}")
-                    fail_import_item(saas_base, runner_token, run_id, item_id, str(exc) or "视频解析失败，请检查当前网络环境后重试。")
+                    msg = str(exc) or "视频解析失败，请检查当前网络环境后重试。"
+                    helper_log(f"import item failed: {item_id} {msg}")
+                    fail_import_item(saas_base, runner_token, run_id, item_id, msg)
     finally:
         with RUNNERS_LOCK:
             ACTIVE_RUNNERS.discard(run_id)
@@ -522,15 +496,10 @@ class Handler(BaseHTTPRequestHandler):
                 helper_log(f"success response dropped: {exc}")
                 return
             helper_log("request done")
-        except subprocess.TimeoutExpired:
-            helper_log("download timeout")
-            self.send_json(500, {"success": False, "error": "视频解析超时，请检查当前网络环境后重试。"})
-        except subprocess.CalledProcessError as exc:
-            helper_log(f"download failed: {exc.stderr or exc}")
-            self.send_json(500, {"success": False, "error": "视频解析失败，请检查当前网络环境后重试。"})
         except Exception as exc:
-            helper_log(f"request failed: {exc}")
-            self.send_json(500, {"success": False, "error": str(exc) or "视频解析失败，请检查当前网络环境后重试。"})
+            msg = str(exc) or "视频解析失败，请检查当前网络环境后重试。"
+            helper_log(f"request failed: {msg}")
+            self.send_json(500, {"success": False, "error": msg})
 
 
 class TrayApp:

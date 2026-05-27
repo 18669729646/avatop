@@ -1,6 +1,5 @@
 param(
-  [string]$Version = "0.1.5",
-  [string]$YtDlpPath = ""
+  [string]$Version = "0.1.6"
 )
 
 $ErrorActionPreference = "Stop"
@@ -9,40 +8,17 @@ $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Resolve-Path (Join-Path $Root "..\..")
 $DistRoot = Join-Path $Root "dist"
 $BundleDir = Join-Path $DistRoot "analysis-download-helper-$Version"
-$BinDir = Join-Path $BundleDir "bin"
-
-function Resolve-ToolPath {
-  param([string]$Name, [string]$ExplicitPath)
-  if ($ExplicitPath) {
-    if (!(Test-Path -LiteralPath $ExplicitPath)) {
-      throw "$Name not found at $ExplicitPath"
-    }
-    return (Resolve-Path -LiteralPath $ExplicitPath).Path
-  }
-  $cmd = Get-Command $Name -ErrorAction SilentlyContinue
-  if (!$cmd) {
-    $cmd = Get-Command "$Name.exe" -ErrorAction SilentlyContinue
-  }
-  if (!$cmd) {
-    throw "$Name was not found. Install it or pass -${Name}Path."
-  }
-  return $cmd.Source
-}
-
-$YtDlp = Resolve-ToolPath "yt-dlp" $YtDlpPath
 
 Remove-Item -Recurse -Force -LiteralPath $DistRoot -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 
 Push-Location $Root
 try {
-  python -m PyInstaller --noconfirm --noconsole --onedir --name analysis-download-helper helper.py
+  python -m PyInstaller --noconfirm --noconsole --onedir --name analysis-download-helper --collect-all yt_dlp helper.py
 } finally {
   Pop-Location
 }
 
 Copy-Item -Recurse -Force -Path (Join-Path $Root "dist\analysis-download-helper\*") -Destination $BundleDir
-Copy-Item -LiteralPath $YtDlp -Destination (Join-Path $BinDir "yt-dlp.exe")
 Copy-Item -LiteralPath (Join-Path $ProjectRoot "src\app\favicon.ico") -Destination (Join-Path $BundleDir "favicon.ico")
 Copy-Item -LiteralPath (Join-Path $Root "README.md") -Destination (Join-Path $BundleDir "README.md")
 
