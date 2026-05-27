@@ -167,6 +167,10 @@ if os.name == "nt":
     shell32.Shell_NotifyIconW.restype = wintypes.BOOL
     user32.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT, ctypes.c_int, ctypes.c_int, wintypes.UINT]
     user32.LoadImageW.restype = wintypes.HANDLE
+    shell32.ExtractIconExW.argtypes = [wintypes.LPCWSTR, ctypes.c_int, ctypes.POINTER(wintypes.HICON), ctypes.POINTER(wintypes.HICON), wintypes.UINT]
+    shell32.ExtractIconExW.restype = wintypes.UINT
+    user32.LoadIconW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR]
+    user32.LoadIconW.restype = wintypes.HICON
     user32.DestroyIcon.argtypes = [wintypes.HICON]
     user32.DestroyIcon.restype = wintypes.BOOL
 
@@ -185,6 +189,10 @@ def runtime_dir():
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return app_dir()
+
+
+def make_int_resource_w(value: int) -> wintypes.LPCWSTR:
+    return ctypes.cast(ctypes.c_void_p(value), wintypes.LPCWSTR)
 
 
 def json_bytes(data):
@@ -539,6 +547,7 @@ class TrayApp:
         self.server = None
         self.hwnd = None
         self.icon_handle = None
+        self._icon_should_destroy = False
         self._window_proc_ref = None
         self._exit_requested = threading.Event()
         self._icon_path = runtime_dir() / "favicon.ico"
@@ -547,19 +556,28 @@ class TrayApp:
         self.server = ThreadingHTTPServer((HOST, PORT), Handler)
 
     def _load_icon(self):
-        if not self._icon_path.exists():
-            raise RuntimeError(f"托盘图标不存在: {self._icon_path}")
-        icon_handle = user32.LoadImageW(
-            None,
-            str(self._icon_path),
-            IMAGE_ICON,
-            0,
-            0,
-            LR_LOADFROMFILE | LR_DEFAULTSIZE,
-        )
-        if not icon_handle:
-            raise RuntimeError("无法加载托盘图标")
-        return icon_handle
+        if self._icon_path.exists():
+            icon_handle = user32.LoadImageW(
+                None,
+                str(self._icon_path),
+                IMAGE_ICON,
+                0,
+                0,
+                LR_LOADFROMFILE | LR_DEFAULTSIZE,
+            )
+            if icon_handle:
+                self._icon_should_destroy = True
+                return icon_handle
+
+        if getattr(sys, "frozen", False):
+            large_icon = wintypes.HICON()
+            extracted = shell32.ExtractIconExW(str(Path(sys.executable).resolve()), 0, ctypes.byref(large_icon), None, 1)
+            if extracted and large_icon:
+                self._icon_should_destroy = True
+                return large_icon
+
+        self._icon_should_destroy = False
+        return user32.LoadIconW(None, make_int_resource_w(IDI_APPLICATION))
 
     def _notify_icon(self, action):
         nid = NOTIFYICONDATAW()
@@ -652,10 +670,12 @@ class TrayApp:
                 pass
             if self.icon_handle:
                 try:
-                    user32.DestroyIcon(self.icon_handle)
+                    if self._icon_should_destroy:
+                        user32.DestroyIcon(self.icon_handle)
                 except Exception:
                     pass
                 self.icon_handle = None
+                self._icon_should_destroy = False
             user32.PostQuitMessage(0)
             return 0
         return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -731,10 +751,12 @@ class TrayApp:
                 pass
         if self.icon_handle:
             try:
-                user32.DestroyIcon(self.icon_handle)
+                if self._icon_should_destroy:
+                    user32.DestroyIcon(self.icon_handle)
             except Exception:
                 pass
             self.icon_handle = None
+            self._icon_should_destroy = False
         if self.hwnd:
             try:
                 user32.DestroyWindow(self.hwnd)
