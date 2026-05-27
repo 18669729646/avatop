@@ -1,4 +1,4 @@
-import yt_dlp
+
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ctypes
@@ -281,6 +281,7 @@ def find_downloaded_file(directory):
 
 
 def download_video(source_url, output_dir):
+    import yt_dlp  # delayed: first import takes ~0.5s, avoid blocking startup
     output_template = str(Path(output_dir) / "source.%(ext)s")
     helper_log("download start")
 
@@ -644,11 +645,11 @@ class TrayApp:
         if msg == WM_CLOSE:
             user32.DestroyWindow(hwnd)
             return 0
-            if msg == WM_DESTROY:
-                try:
-                    self._notify_icon(NIM_DELETE)
-                except Exception:
-                    pass
+        if msg == WM_DESTROY:
+            try:
+                self._notify_icon(NIM_DELETE)
+            except Exception:
+                pass
             if self.icon_handle:
                 try:
                     user32.DestroyIcon(self.icon_handle)
