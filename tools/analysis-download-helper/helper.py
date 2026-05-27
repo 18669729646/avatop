@@ -18,10 +18,13 @@ from ctypes import wintypes
 
 HOST = "127.0.0.1"
 PORT = 17321
-VERSION = "0.1.6"
+VERSION = "0.1.7"
 YTDLP_SINGLE_FILE_FORMAT = "best[ext=mp4][acodec!=none][vcodec!=none]/best[acodec!=none][vcodec!=none]/best"
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 180
 COMPLETE_UPLOAD_TIMEOUT_SECONDS = 600
+MAX_CONCURRENT_RUNS = 1
+MAX_REQUEST_RETRIES = 3
+REQUEST_RETRY_DELAY_SECONDS = 2
 LOG_LOCK = threading.Lock()
 RUNNERS_LOCK = threading.Lock()
 ACTIVE_RUNNERS = set()
@@ -205,48 +208,69 @@ def helper_log(message):
         pass
 
 
+def _request_with_retries(fn, description, max_retries=MAX_REQUEST_RETRIES, delay=REQUEST_RETRY_DELAY_SECONDS):
+    last_exc = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            return fn()
+        except Exception as exc:
+            last_exc = exc
+            if attempt < max_retries:
+                helper_log(f"{description} failed (attempt {attempt}/{max_retries}): {exc}, retrying in {delay}s...")
+                time.sleep(delay)
+            else:
+                helper_log(f"{description} failed (attempt {attempt}/{max_retries}): {exc}, giving up")
+    raise last_exc
+
+
 def post_json(url, token, payload, timeout=DEFAULT_REQUEST_TIMEOUT_SECONDS):
-    body = json_bytes(payload)
-    req = urlrequest.Request(
-        url,
-        data=body,
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        },
-    )
-    with urlrequest.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    def _do():
+        body = json_bytes(payload)
+        req = urlrequest.Request(
+            url,
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+        )
+        with urlrequest.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    return _request_with_retries(_do, f"POST {url}")
 
 
 def post_runner_json(url, runner_token, payload, timeout=DEFAULT_REQUEST_TIMEOUT_SECONDS):
-    body = json_bytes(payload)
-    req = urlrequest.Request(
-        url,
-        data=body,
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {runner_token}",
-            "Content-Type": "application/json",
-        },
-    )
-    with urlrequest.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    def _do():
+        body = json_bytes(payload)
+        req = urlrequest.Request(
+            url,
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {runner_token}",
+                "Content-Type": "application/json",
+            },
+        )
+        with urlrequest.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    return _request_with_retries(_do, f"POST {url}")
 
 
 def post_chunk(url, token, chunk, timeout=DEFAULT_REQUEST_TIMEOUT_SECONDS):
-    req = urlrequest.Request(
-        url,
-        data=chunk,
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/octet-stream",
-        },
-    )
-    with urlrequest.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    def _do():
+        req = urlrequest.Request(
+            url,
+            data=chunk,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/octet-stream",
+            },
+        )
+        with urlrequest.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    return _request_with_retries(_do, f"CHUNK {url}")
 
 
 def find_downloaded_file(directory):
@@ -348,13 +372,18 @@ def upload_video(payload, file_path):
 
 def fail_import_item(saas_base, runner_token, run_id, item_id, message):
     try:
-        post_runner_json(
-            f"{saas_base}/api/analysis-master/import-runs/{run_id}/items/{item_id}/fail",
-            runner_token,
-            {"error": message, "maxRetries": 1},
+        _request_with_retries(
+            lambda: post_runner_json(
+                f"{saas_base}/api/analysis-master/import-runs/{run_id}/items/{item_id}/fail",
+                runner_token,
+                {"error": message, "maxRetries": 1},
+            ),
+            f"fail item {item_id}",
+            max_retries=3,
+            delay=2,
         )
     except Exception as exc:
-        helper_log(f"item fail callback failed: {item_id} {exc}")
+        helper_log(f"item fail callback failed after retries: {item_id} {exc}")
 
 
 def run_import_runner(payload):
@@ -362,7 +391,6 @@ def run_import_runner(payload):
     saas_base = payload["saasBaseUrl"].rstrip("/")
     runner_token = payload["runnerToken"]
     auth_token = payload["authToken"]
-    concurrency = max(1, min(int(payload.get("concurrency") or 3), 3))
     worker_id = payload.get("workerId") or f"helper-{VERSION}"
 
     helper_log(f"import run start: {run_id}")
@@ -371,7 +399,7 @@ def run_import_runner(payload):
             claim = post_runner_json(
                 f"{saas_base}/api/analysis-master/import-runs/{run_id}/claim",
                 runner_token,
-                {"workerId": worker_id, "limit": concurrency},
+                {"workerId": worker_id, "limit": 1},
             )
             items = (claim.get("data") or {}).get("items") or []
             if not items:
@@ -458,6 +486,9 @@ class Handler(BaseHTTPRequestHandler):
                     return
 
                 with RUNNERS_LOCK:
+                    if len(ACTIVE_RUNNERS) >= MAX_CONCURRENT_RUNS:
+                        self.send_json(429, {"success": False, "error": "已有批量任务执行中，请等待完成后再试"})
+                        return
                     if run_id not in ACTIVE_RUNNERS:
                         ACTIVE_RUNNERS.add(run_id)
                         threading.Thread(
