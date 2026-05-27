@@ -29,6 +29,7 @@ import {
   ANALYSIS_LOCAL_HELPER_URL,
 } from '@/lib/analysis-master-local-helper';
 import type { AnalysisMasterBatchImportSummary } from '@/lib/analysis-master-import-queue';
+import { shouldRefreshAnalysisProjectDetails } from '@/lib/analysis-master-project-refresh';
 
 const ANALYSIS_MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 const ANALYSIS_HELPER_DOWNLOAD_URL = '/analysis-helper/analysis-download-helper-0.1.7.zip';
@@ -422,13 +423,7 @@ const ProjectPanel = React.memo<ProjectPanelProps>(({
   if (!prevP && !nextP) return true; // 都是 null，不重渲染
   if (!prevP || !nextP) return false; // 一个是 null，需要重渲染
   return (
-    prevP.id === nextP.id &&
-    prevP.status === nextP.status &&
-    prevP.error === nextP.error &&
-    prevP.optimisticStatus === nextP.optimisticStatus &&
-    JSON.stringify(prevP.result) === JSON.stringify(nextP.result) &&
-    prevP.videoUrl === nextP.videoUrl &&
-    prevP.audioUrl === nextP.audioUrl &&
+    !shouldRefreshAnalysisProjectDetails(prevP, nextP) &&
     prev.analyzingId === next.analyzingId &&
     prev.exporting === next.exporting
   );
@@ -482,21 +477,7 @@ export default function AnalysisMasterPage() {
   } else if (rawSelectedProject && stableProjectRef.current) {
     const prev = stableProjectRef.current;
     const curr = rawSelectedProject;
-    if (
-      prev.id !== curr.id ||
-      prev.status !== curr.status ||
-      prev.error !== curr.error ||
-      prev.videoKey !== curr.videoKey ||
-      prev.videoUrl !== curr.videoUrl ||
-      prev.audioKey !== curr.audioKey ||
-      prev.audioUrl !== curr.audioUrl ||
-      prev.optimisticStatus !== curr.optimisticStatus ||
-      Boolean(prev.result) !== Boolean(curr.result) ||
-      (prev.result && curr.result && JSON.stringify(prev.result) !== JSON.stringify(curr.result)) ||
-      prev.videoDuration !== curr.videoDuration ||
-      prev.audioDuration !== curr.audioDuration ||
-      prev.fileSize !== curr.fileSize
-    ) {
+    if (shouldRefreshAnalysisProjectDetails(prev, curr)) {
       stableProjectRef.current = rawSelectedProject;
     }
   }
