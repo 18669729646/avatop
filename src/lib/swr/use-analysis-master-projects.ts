@@ -11,9 +11,11 @@ export interface AnalysisProject {
   name: string;
   sourceType: string;
   sourceUrl?: string;
+  videoKey?: string;
   videoUrl?: string;
   videoDuration?: number;
   fileSize?: number;
+  audioKey?: string;
   audioUrl?: string;
   audioDuration?: number;
   audioFileSize?: number;

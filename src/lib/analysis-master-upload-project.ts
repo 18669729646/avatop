@@ -24,22 +24,18 @@ export function buildAnalysisUploadProjectUpsert(params: AnalysisUploadProjectUp
     video_url: params.videoUrl,
     status: 'draft',
     source_type: params.sourceUrl ? 'link' : 'upload',
+    source_url: params.sourceUrl || null,
     file_size: params.fileSize,
+    audio_key: params.audioKey || null,
+    audio_url: params.audioKey ? params.audioUrl || '' : null,
+    audio_duration: params.audioKey ? params.audioDuration || 0 : null,
+    audio_file_size: params.audioKey ? params.audioFileSize || 0 : 0,
     created_at: now,
     updated_at: now,
   };
 
-  if (params.sourceUrl) {
-    row.source_url = params.sourceUrl;
-  }
   if (params.videoDuration > 0) {
     row.video_duration = params.videoDuration;
-  }
-  if (params.audioKey) {
-    row.audio_key = params.audioKey;
-    row.audio_url = params.audioUrl || '';
-    row.audio_duration = params.audioDuration || 0;
-    row.audio_file_size = params.audioFileSize || 0;
   }
 
   return row;

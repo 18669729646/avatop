@@ -39,8 +39,32 @@ describe('analysis master upload project upsert', () => {
     });
 
     assert.equal(row.source_type, 'upload');
-    assert.equal(Object.hasOwn(row, 'source_url'), false);
+    assert.equal(row.source_url, null);
     assert.equal(Object.hasOwn(row, 'video_duration'), false);
-    assert.equal(Object.hasOwn(row, 'audio_key'), false);
+    assert.equal(row.audio_key, null);
+    assert.equal(row.audio_url, null);
+    assert.equal(row.audio_duration, null);
+    assert.equal(row.audio_file_size, 0);
+  });
+
+  it('clears stale audio fields when a reused project upload has no extracted audio', () => {
+    const row = buildAnalysisUploadProjectUpsert({
+      projectId: 'am-3',
+      userId: 'user-1',
+      name: 'Retried import',
+      videoKey: 'new-video-key',
+      videoUrl: 'https://cdn.example.com/new-video.mp4',
+      videoDuration: 15,
+      fileSize: 4096,
+      sourceUrl: 'https://www.tiktok.com/@maker/video/456',
+      now: '2026-05-22T00:00:00.000Z',
+    });
+
+    assert.equal(row.video_key, 'new-video-key');
+    assert.equal(row.video_duration, 15);
+    assert.equal(row.audio_key, null);
+    assert.equal(row.audio_url, null);
+    assert.equal(row.audio_duration, null);
+    assert.equal(row.audio_file_size, 0);
   });
 });

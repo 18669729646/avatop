@@ -111,9 +111,11 @@ interface AnalysisProject {
   name: string;
   sourceType: string;
   sourceUrl?: string;
+  videoKey?: string;
   videoUrl?: string;
   videoDuration?: number;
   fileSize?: number;
+  audioKey?: string;
   audioUrl?: string;
   audioDuration?: number;
   audioFileSize?: number;
@@ -314,7 +316,7 @@ const ProjectPanel = React.memo<ProjectPanelProps>(({
         </CardHeader>
         <CardContent className="space-y-4">
           {selectedProject.videoUrl && (
-            <video key={selectedProject.id + '-video'} src={selectedProject.videoUrl} controls className="w-full max-h-[420px] rounded-lg bg-black" />
+            <video key={`${selectedProject.id}-${selectedProject.videoKey || selectedProject.videoUrl || ''}`} src={selectedProject.videoUrl} controls className="w-full max-h-[420px] rounded-lg bg-black" />
           )}
           {selectedProject.audioUrl && (
             <div className="rounded-lg border">
@@ -323,7 +325,7 @@ const ProjectPanel = React.memo<ProjectPanelProps>(({
                 <span className="text-xs font-medium">音频 <span className="text-muted-foreground">({Math.floor((selectedProject.audioDuration || 0) / 60)}:{String((selectedProject.audioDuration || 0) % 60).padStart(2, '0')})</span></span>
               </div>
               <div className="px-3 py-2">
-                <audio controls className="w-full h-8"><source src={selectedProject.audioUrl} type="audio/mpeg" /></audio>
+                <audio key={`${selectedProject.id}-${selectedProject.audioKey || selectedProject.audioUrl || ''}`} controls className="w-full h-8"><source src={selectedProject.audioUrl} type="audio/mpeg" /></audio>
               </div>
             </div>
           )}
@@ -484,6 +486,10 @@ export default function AnalysisMasterPage() {
       prev.id !== curr.id ||
       prev.status !== curr.status ||
       prev.error !== curr.error ||
+      prev.videoKey !== curr.videoKey ||
+      prev.videoUrl !== curr.videoUrl ||
+      prev.audioKey !== curr.audioKey ||
+      prev.audioUrl !== curr.audioUrl ||
       prev.optimisticStatus !== curr.optimisticStatus ||
       Boolean(prev.result) !== Boolean(curr.result) ||
       (prev.result && curr.result && JSON.stringify(prev.result) !== JSON.stringify(curr.result)) ||

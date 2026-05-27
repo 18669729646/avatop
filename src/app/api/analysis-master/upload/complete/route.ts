@@ -8,6 +8,7 @@ import { URL_EXPIRE_TIME } from '@/lib/storage-types';
 import { buildAnalysisMasterItemSuccessPatch } from '@/lib/analysis-master-import-runs';
 import { refreshAnalysisMasterImportRunProgress } from '@/lib/analysis-master-import-run-db';
 import { enqueueAnalysisTaskForProject } from '@/lib/analysis-master-queue';
+import { buildAnalysisUploadProjectUpsert } from '@/lib/analysis-master-upload-project';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -204,30 +205,20 @@ export async function POST(request: NextRequest) {
 
         if (projectId) {
           const client = getSupabaseClient();
-          const upsertData: Record<string, unknown> = {
-            id: projectId,
-            user_id: auth.userId,
+          const upsertData = buildAnalysisUploadProjectUpsert({
+            projectId,
+            userId: auth.userId,
             name: (session.name as string) || (session.fileName as string) || 'Untitled project',
-            video_key: s3Key,
-            video_url: url,
-            status: 'draft',
-            source_type: typeof session.sourceUrl === 'string' ? 'link' : 'upload',
-            file_size: mergedBuffer.length,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          };
-          if (typeof session.sourceUrl === 'string') {
-            upsertData.source_url = session.sourceUrl;
-          }
-          if (videoDuration > 0) {
-            upsertData.video_duration = videoDuration;
-          }
-          if (audioKey) {
-            upsertData.audio_key = audioKey;
-            upsertData.audio_url = audioUrl;
-            upsertData.audio_duration = audioDuration;
-            upsertData.audio_file_size = audioFileSize;
-          }
+            videoKey: s3Key,
+            videoUrl: url,
+            videoDuration,
+            fileSize: mergedBuffer.length,
+            sourceUrl: typeof session.sourceUrl === 'string' ? session.sourceUrl : undefined,
+            audioKey: audioKey || undefined,
+            audioUrl,
+            audioDuration,
+            audioFileSize,
+          });
 
           const { error: upsertError } = await client
             .from('analysis_master_projects')
